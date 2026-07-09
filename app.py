@@ -2,6 +2,7 @@ from flask import Flask, request
 import telebot
 import os
 import json
+from downloader import download_instagram_post
 
 TOKEN = "8837695158:AAETrphGJh6wS1bmCXHOFB7-r4YPx0n8KR8"
 bot = telebot.TeleBot(TOKEN)
@@ -10,25 +11,69 @@ app = Flask(__name__)
 @app.route('/', methods=['POST'])
 def webhook():
     try:
-        # دریافت داده‌های JSON از تلگرام
         json_str = request.stream.read().decode('utf-8')
         update = telebot.types.Update.de_json(json_str)
-        
-        # پردازش دستی پیام (بدون هندلر!)
-        if update.message:
-            chat_id = update.message.chat.id
-            text = update.message.text or ""
-            
-            # پاسخ به دستور /start
-            if text == "/start":
-                bot.send_message(chat_id, "سلام! ربات روشنه! 🎉")
-            else:
-                bot.send_message(chat_id, f"شما گفتید: {text}")
-        
+        bot.process_new_updates([update])
         return 'ok', 200
     except Exception as e:
         print(f"خطا: {e}")
         return 'error', 500
+
+# ========== هندلر دستور start ==========
+@bot.message_handler(commands=['start'])
+def handle_start(message):
+    bot.send_message(
+        message.chat.id,
+        "👋 سلام! به ربات دانلود اینستاگرام خوش آمدید!\n\n"
+        "📌 لینک پست اینستاگرام را ارسال کنید تا عکس یا ویدیو را دانلود کنم.\n"
+        "✅ پشتیبانی از: عکس، ویدیو، رییل، پست‌های چندتایی"
+    )
+
+# ========== هندلر لینک اینستاگرام ==========
+@bot.message_handler(func=lambda message: "instagram.com" in message.text)
+def handle_instagram_link(message):
+    url = message.text.strip()
+    
+    # پیام در حال دانلود
+    status_msg = bot.send_message(message.chat.id, "⏳ در حال دانلود... لطفاً صبر کنید.")
+    
+    try:
+        files, caption = download_instagram_post(url)
+        
+        if files:
+            bot.delete_message(message.chat.id, status_msg.message_id)
+            
+            # ارسال همه فایل‌ها
+            for idx, file_path in enumerate(files):
+                with open(file_path, 'rb') as f:
+                    # کپشن فقط برای فایل اول
+                    cap = caption if idx == 0 else None
+                    if file_path.endswith(".mp4"):
+                        bot.send_video(message.chat.id, f, caption=cap[:1024])
+                    else:
+                        bot.send_photo(message.chat.id, f, caption=cap[:1024])
+                os.remove(file_path)
+        else:
+            bot.edit_message_text(
+                caption or "❌ خطا در دانلود",
+                message.chat.id,
+                status_msg.message_id
+            )
+    except Exception as e:
+        bot.edit_message_text(
+            f"❌ خطا: {str(e)}",
+            message.chat.id,
+            status_msg.message_id
+        )
+
+# ========== هندلر پیام‌های دیگر ==========
+@bot.message_handler(func=lambda message: True)
+def handle_other(message):
+    bot.send_message(
+        message.chat.id,
+        "❗ لطفاً یک لینک معتبر از اینستاگرام ارسال کنید.\n"
+        "مثال: https://www.instagram.com/p/CxYz123AbC/"
+    )
 
 @app.route('/setwebhook', methods=['GET'])
 def set_webhook():

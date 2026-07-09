@@ -6,23 +6,34 @@ TOKEN = "8837695158:AAETrphGJh6wS1bmCXHOFB7-r4YPx0n8KR8"
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# ========== هندلر ساده برای همه پیام‌ها ==========
-@bot.message_handler(func=lambda message: True)
-def echo_all(message):
-    bot.reply_to(message, "پیام دریافت شد! ✅")
+# ========== هندلر دستور start ==========
+@bot.message_handler(commands=['start'])
+def handle_start(message):
+    bot.send_message(message.chat.id, "سلام! ربات روشنه! 🎉")
+
+# ========== هندلر همه پیام‌ها ==========
+@bot.message_handler(func=lambda m: True)
+def handle_message(message):
+    bot.send_message(message.chat.id, f"شما گفتید: {message.text}")
 
 # ========== Webhook ==========
 @app.route('/', methods=['POST'])
 def webhook():
-    update = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
-    bot.process_new_updates([update])
-    return 'ok', 200
+    try:
+        json_str = request.stream.read().decode('utf-8')
+        update = telebot.types.Update.de_json(json_str)
+        bot.process_new_updates([update])
+        return 'ok', 200
+    except Exception as e:
+        print(f"خطا: {e}")
+        return 'error', 500
 
 @app.route('/setwebhook', methods=['GET'])
 def set_webhook():
     bot.remove_webhook()
-    bot.set_webhook(url="https://telegram-bot-tkaz.onrender.com/")
-    return "Webhook set successfully!", 200
+    webhook_url = "https://telegram-bot-tkaz.onrender.com/"
+    bot.set_webhook(url=webhook_url)
+    return f"Webhook set to {webhook_url}", 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))

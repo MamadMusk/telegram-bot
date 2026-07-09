@@ -2,10 +2,9 @@ from flask import Flask, request
 import telebot
 import os
 import re
-import instaloader
-import yt_dlp
 import logging
 import time
+from parth_dl import InstagramDownloader
 
 TOKEN = "8837695158:AAETrphGJh6wS1bmCXHOFB7-r4YPx0n8KR8"
 bot = telebot.TeleBot(TOKEN)
@@ -17,106 +16,44 @@ if not os.path.exists(DOWNLOAD_DIR):
 
 logging.basicConfig(level=logging.INFO)
 
-# ==================== اطلاعات اکانت اینستاگرام ====================
-INSTAGRAM_USERNAME = "your_username"   # <-- اینجا یوزرنیم خودت رو بذار
-INSTAGRAM_PASSWORD = "your_password"   # <-- اینجا پسورد خودت رو بذار
-# =================================================================
-
-def get_instaloader():
-    """ایجاد یک نمونه از instaloader با لاگین مستقیم"""
-    loader = instaloader.Instaloader(
-        download_pictures=True,
-        download_videos=True,
-        download_video_thumbnails=False,
-        compress_json=False,
-        save_metadata=False,
-        post_metadata_txt_pattern='',
-        max_connection_attempts=3
-    )
-    
-    # لاگین با نام کاربری و رمز عبور
-    try:
-        loader.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
-        logging.info("Login successful with username/password")
-    except Exception as e:
-        logging.error(f"Login failed: {e}")
-        # اگر لاگین نشد، بدون لاگین امتحان کن (فقط برای پست‌های عمومی)
-        logging.warning("Trying without login...")
-    
-    return loader
-
 def download_instagram_post(url):
-    files = []
-    caption = ""
-    
-    # استخراج shortcode
-    shortcode_match = re.search(r'/(?:p|reel|tv|stories)/([^/?]+)', url)
-    if not shortcode_match:
-        return None, "لینک معتبر اینستاگرام نیست."
-    shortcode = shortcode_match.group(1)
-    logging.info(f"Shortcode: {shortcode}")
-    
-    # ===== روش اول: instaloader با لاگین مستقیم =====
+    """
+    دانلود هر نوع پست اینستاگرام با parth-dl
+    برمی‌گرداند: (list_of_files, caption) یا (None, error_message)
+    """
     try:
-        logging.info("Trying instaloader with direct login...")
-        loader = get_instaloader()
+        logging.info(f"Starting download with parth-dl for: {url}")
         
-        # دریافت پست
-        post = instaloader.Post.from_shortcode(loader.context, shortcode)
-        logging.info(f"Post type: {post.typename}")
+        # ایجاد شیء دانلودر
+        dl = InstagramDownloader(verbose=False)
         
-        # دانلود پست
-        loader.download_post(post, target=shortcode)
+        # دانلود مستقیم
+        result = dl.download(url, output_dir=DOWNLOAD_DIR)
         
-        # پیدا کردن فایل‌های دانلود شده
-        for file in os.listdir('.'):
-            if file.startswith(shortcode) and (file.endswith('.jpg') or file.endswith('.png') or file.endswith('.mp4') or file.endswith('.jpeg')):
-                files.append(os.path.join('.', file))
+        if not result:
+            return None, "هیچ محتوایی برای دانلود پیدا نشد."
         
-        caption = post.caption if post.caption else ""
-        logging.info(f"Downloaded {len(files)} files with instaloader")
+        # result می‌تونه یک فایل یا لیستی از فایل‌ها باشه
+        files = []
+        caption = ""
         
-        if files:
-            return files, caption
-            
+        if isinstance(result, list):
+            files = result
+        else:
+            files = [result]
+        
+        # فقط فایل‌های موجود رو نگه دار
+        existing_files = [f for f in files if os.path.exists(f)]
+        
+        if not existing_files:
+            return None, "فایلی دانلود نشد."
+        
+        logging.info(f"Successfully downloaded {len(existing_files)} files")
+        return existing_files, caption
+        
     except Exception as e:
-        logging.error(f"instaloader failed: {e}")
-    
-    # ===== روش دوم: yt-dlp (فقط برای فیلم‌ها) =====
-    try:
-        logging.info("Trying yt-dlp as fallback...")
-        ydl_opts = {
-            'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
-            'quiet': True,
-            'no_warnings': True,
-            'cookiefile': 'cookies.txt' if os.path.exists("cookies.txt") else None,
-            'format': 'best[ext=mp4]/best',
-            'ignoreerrors': True,
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            if info:
-                if 'entries' in info:
-                    for entry in info['entries']:
-                        if entry:
-                            filename = ydl.prepare_filename(entry)
-                            if os.path.exists(filename):
-                                files.append(filename)
-                    caption = info.get('description', '')
-                else:
-                    filename = ydl.prepare_filename(info)
-                    if os.path.exists(filename):
-                        files.append(filename)
-                    caption = info.get('description', '')
-        
-        if files:
-            logging.info(f"Downloaded {len(files)} files with yt-dlp")
-            return files, caption
-            
-    except Exception as e:
-        logging.error(f"yt-dlp failed: {e}")
-    
-    return None, "دانلود با مشکل مواجه شد."
+        logging.error(f"parth-dl failed: {e}")
+        return None, f"خطا در دانلود: {str(e)}"
 
 @app.route('/', methods=['POST'])
 def webhook():

@@ -15,6 +15,8 @@ DOWNLOAD_DIR = "downloads"
 if not os.path.exists(DOWNLOAD_DIR):
     os.makedirs(DOWNLOAD_DIR)
 
+logging.basicConfig(level=logging.INFO)
+
 def download_instagram_post(url):
     files = []
     caption = ""
@@ -24,7 +26,6 @@ def download_instagram_post(url):
         return None, "لینک معتبر اینستاگرام نیست."
     shortcode = shortcode_match.group(1)
     
-    # yt-dlp
     try:
         ydl_opts = {
             'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
@@ -52,7 +53,6 @@ def download_instagram_post(url):
     except Exception as e:
         logging.error(f"yt-dlp failed: {e}")
     
-    # instaloader
     try:
         loader = instaloader.Instaloader(
             download_pictures=True,
@@ -86,6 +86,7 @@ def handle_start(message):
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
+    logging.info(f"Received message from {message.chat.id}: {message.text}")
     url = message.text.strip()
     if not url.startswith('https://www.instagram.com/') and not url.startswith('https://instagram.com/'):
         bot.reply_to(message, "لطفاً یک لینک معتبر اینستاگرام بفرست.")
@@ -116,6 +117,7 @@ def handle_message(message):
 def webhook():
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
+        logging.info("Webhook received")
         update = telebot.types.Update.de_json(json_string)
         bot.process_new_updates([update])
         return 'OK', 200

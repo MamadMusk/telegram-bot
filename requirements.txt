@@ -1,33 +1,4 @@
-# ============================================================
-#  requirements.txt — TelegramBot v2.0
-#  Tested with Python 3.12+
-# ============================================================
-
-# ─── Telegram Bot Framework ───
-aiogram>=3.4.1
-
-# ─── Instagram Downloader ───
-instaloader==4.15.1
-yt-dlp>=2024.1.0
-
-# ─── Web Framework (Admin Panel) ───
-fastapi>=0.109.0
-uvicorn[standard]>=0.25.0
-jinja2>=3.1.3
-python-multipart>=0.0.6
-itsdangerous>=2.1.2
-
-# ─── Configuration ───
-pydantic>=2.5.0
-pydantic-settings>=2.1.0
-python-dotenv>=1.0.0
-
-# ─── Utilities ───
-tenacity>=8.2.3
-httpx>=0.26.0
-
-# ─── Development (optional) ───
-# pytest>=7.4.0
-# pytest-asyncio>=0.23.0
-
+pyTelegramBotAPI==4.34.0
+Flask==2.3.3
+requests==2.32.3
 gunicorn==23.0.0

@@ -1,0 +1,58 @@
+# ============================================================
+#  .gitignore — TelegramBot v2.0
+# ============================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Secrets (CRITICAL — never commit these!)
+.env
+.env.local
+.env.*.local
+cookies.txt
+*.session
+*.session-journal
+secrets.json
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+bot_data.db
+
+# Downloads / runtime
+downloads/
+data/
+logs/
+*.log
+
+# OS files
+Thumbs.db
+desktop.ini
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/

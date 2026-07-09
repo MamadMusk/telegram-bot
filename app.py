@@ -6,6 +6,7 @@ import instaloader
 import yt_dlp
 import logging
 import time
+import http.cookiejar as cookielib
 
 TOKEN = "8837695158:AAETrphGJh6wS1bmCXHOFB7-r4YPx0n8KR8"
 bot = telebot.TeleBot(TOKEN)
@@ -45,12 +46,18 @@ def download_instagram_post(url):
             max_connection_attempts=3
         )
         
-        # بارگذاری کوکی
+        # ===== روش درست و استاندارد بارگذاری کوکی =====
         if os.path.exists("cookies.txt"):
-            loader.load_cookies_from_txt("cookies.txt")
-            logging.info("Cookies loaded successfully")
+            try:
+                # بارگذاری کوکی با فرمت Netscape
+                cookie_jar = cookielib.MozillaCookieJar()
+                cookie_jar.load('cookies.txt', ignore_expires=True, ignore_discard=True)
+                loader.context._session.cookies.update(cookie_jar)
+                logging.info("Cookies loaded successfully via cookie jar")
+            except Exception as e:
+                logging.warning(f"Could not load cookies: {e}")
         else:
-            logging.warning("cookies.txt not found!")
+            logging.warning("cookies.txt not found! Trying without cookies...")
         
         # دریافت پست
         post = instaloader.Post.from_shortcode(loader.context, shortcode)

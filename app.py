@@ -3,8 +3,12 @@ import telebot
 import os
 import re
 import yt_dlp
+import gallery_dl
 import logging
 import time
+import json
+from io import StringIO
+import contextlib
 
 TOKEN = "8837695158:AAETrphGJh6wS1bmCXHOFB7-r4YPx0n8KR8"
 bot = telebot.TeleBot(TOKEN)
@@ -16,59 +20,106 @@ if not os.path.exists(DOWNLOAD_DIR):
 
 logging.basicConfig(level=logging.INFO)
 
+def download_with_gallery_dl(url, output_dir):
+    """
+    دانلود با gallery-dl و برگرداندن لیست فایل‌های دانلود شده
+    """
+    try:
+        # تنظیمات gallery-dl برای خروجی
+        config = {
+            "extractor": {
+                "instagram": {
+                    "cookies": "cookies.txt" if os.path.exists("cookies.txt") else None,
+                    "posts": "metadata",
+                    "archive": None,
+                }
+            },
+            "output": {
+                "directory": [output_dir],
+                "filename": "{shortcode}_{num}.{extension}"
+            }
+        }
+        
+        # اجرای gallery-dl و گرفتن خروجی
+        f = StringIO()
+        with contextlib.redirect_stderr(f), contextlib.redirect_stdout(f):
+            gallery_dl.download([url], config, False)
+        
+        # پیدا کردن فایل‌های دانلود شده
+        downloaded_files = []
+        for root, dirs, files in os.walk(output_dir):
+            for file in files:
+                if file.endswith(('.jpg', '.jpeg', '.png', '.mp4', '.mov')):
+                    downloaded_files.append(os.path.join(root, file))
+        
+        if downloaded_files:
+            logging.info(f"✅ gallery-dl downloaded {len(downloaded_files)} files")
+            return downloaded_files
+        else:
+            logging.warning("⚠️ gallery-dl didn't download any files")
+            return None
+            
+    except Exception as e:
+        logging.error(f"gallery-dl error: {e}")
+        return None
+
 def download_instagram_post(url):
     """
-    دانلود با yt-dlp - هم عکس و هم فیلم و پست‌های چندتایی
+    دانلود با اولویت yt-dlp و fallback به gallery-dl
     """
     try:
         logging.info(f"Downloading: {url}")
         
-        # تنظیمات yt-dlp
+        # ===== مرحله ۱: تلاش با yt-dlp =====
         ydl_opts = {
             'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
             'quiet': True,
             'no_warnings': False,
-            'cookiefile': 'cookies.txt',  # اگر کوکی نداری، این خط رو پاک کن
-            'format': 'best',  # بهترین کیفیت (چه عکس چه فیلم)
+            'cookiefile': 'cookies.txt' if os.path.exists("cookies.txt") else None,
+            'format': 'best[ext=mp4]/best',  # اولویت با mp4
             'ignoreerrors': True,
             'extract_flat': False,
-            'writesubtitles': False,
-            'writeautomaticsub': False,
         }
         
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            
-            files = []
-            caption = ""
-            
-            if info:
-                # پست چندتایی (entries)
-                if 'entries' in info and info['entries']:
-                    for entry in info['entries']:
-                        if entry:
-                            filename = ydl.prepare_filename(entry)
-                            if os.path.exists(filename):
-                                files.append(filename)
-                    # برای carousel، کپشن رو از entry اول می‌گیریم
-                    if info['entries'] and info['entries'][0]:
-                        caption = info['entries'][0].get('description', '')
-                else:
-                    # پست تکی
-                    filename = ydl.prepare_filename(info)
-                    if os.path.exists(filename):
-                        files.append(filename)
-                    caption = info.get('description', '')
-            
-            # اگه هیچ فایلی دانلود نشد، پیام خطا
-            if not files:
-                return None, "هیچ محتوایی برای دانلود پیدا نشد (ممکنه پست خصوصی یا حذف شده باشه)."
-            
-            logging.info(f"✅ Downloaded {len(files)} files")
-            return files, caption
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                files = []
+                caption = ""
+                
+                if info:
+                    if 'entries' in info and info['entries']:
+                        for entry in info['entries']:
+                            if entry:
+                                filename = ydl.prepare_filename(entry)
+                                if os.path.exists(filename):
+                                    files.append(filename)
+                        if info['entries'] and info['entries'][0]:
+                            caption = info['entries'][0].get('description', '')
+                    else:
+                        filename = ydl.prepare_filename(info)
+                        if os.path.exists(filename):
+                            files.append(filename)
+                        caption = info.get('description', '')
+                
+                if files:
+                    logging.info(f"✅ yt-dlp downloaded {len(files)} files")
+                    return files, caption
+                    
+        except Exception as e:
+            logging.warning(f"yt-dlp failed: {e}")
+        
+        # ===== مرحله ۲: Fallback به gallery-dl =====
+        logging.info("Trying gallery-dl as fallback...")
+        files = download_with_gallery_dl(url, DOWNLOAD_DIR)
+        
+        if files:
+            return files, ""
+        else:
+            return None, "هیچ محتوایی برای دانلود پیدا نشد (ممکنه پست خصوصی یا حذف شده باشه)."
             
     except Exception as e:
-        logging.error(f"yt-dlp error: {e}")
+        logging.error(f"Download error: {e}")
         return None, f"خطا: {str(e)}"
 
 @app.route('/', methods=['POST'])
@@ -100,7 +151,6 @@ def webhook():
                     for i, f in enumerate(files):
                         try:
                             if os.path.exists(f):
-                                # تشخیص نوع فایل
                                 if f.lower().endswith(('.mp4', '.mov', '.avi')):
                                     with open(f, 'rb') as video:
                                         bot.send_video(chat_id, video, caption=caption if i == 0 else None)

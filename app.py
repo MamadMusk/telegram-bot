@@ -3,12 +3,10 @@ import telebot
 import os
 import re
 import yt_dlp
-import gallery_dl
 import logging
 import time
-import json
-from io import StringIO
-import contextlib
+import subprocess
+import shutil
 
 TOKEN = "8837695158:AAETrphGJh6wS1bmCXHOFB7-r4YPx0n8KR8"
 bot = telebot.TeleBot(TOKEN)
@@ -22,27 +20,28 @@ logging.basicConfig(level=logging.INFO)
 
 def download_with_gallery_dl(url, output_dir):
     """
-    دانلود با gallery-dl با دریافت خودکار کوکی از مرورگر
+    دانلود با gallery-dl از طریق خط فرمان (subprocess)
     """
     try:
-        # تنظیمات gallery-dl برای دریافت کوکی از مرورگر
-        config = {
-            "extractor": {
-                "instagram": {
-                    "cookies": ["firefox"],  # یا ["chrome"] اگر از کروم استفاده می‌کنی
-                    "cookies-update": True,  # کوکی رو هر بار از مرورگر می‌گیره
-                }
-            },
-            "output": {
-                "directory": [output_dir],
-                "filename": "{shortcode}_{num}.{extension}"
-            }
-        }
+        # تنظیمات خط فرمان برای gallery-dl
+        cmd = [
+            "gallery-dl",
+            "--cookies-from-browser", "firefox",  # اگه کروم داری، به chrome تغییر بده
+            "-D", output_dir,
+            "-o", "filename={shortcode}_{num}.{extension}",
+            url
+        ]
         
-        # اجرای gallery-dl
-        f = StringIO()
-        with contextlib.redirect_stderr(f), contextlib.redirect_stdout(f):
-            gallery_dl.download([url], config, False)
+        logging.info(f"Running: {' '.join(cmd)}")
+        
+        # اجرا و گرفتن خروجی
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        
+        if result.returncode != 0:
+            logging.error(f"gallery-dl failed: {result.stderr}")
+            return None
+        
+        logging.info(f"gallery-dl stdout: {result.stdout}")
         
         # پیدا کردن فایل‌های دانلود شده
         downloaded_files = []
@@ -58,6 +57,9 @@ def download_with_gallery_dl(url, output_dir):
             logging.warning("⚠️ gallery-dl didn't download any files")
             return None
             
+    except subprocess.TimeoutExpired:
+        logging.error("gallery-dl timeout")
+        return None
     except Exception as e:
         logging.error(f"gallery-dl error: {e}")
         return None
@@ -69,7 +71,7 @@ def download_instagram_post(url):
     try:
         logging.info(f"Downloading: {url}")
         
-        # ===== مرحله ۱: تلاش با yt-dlp =====
+        # ===== مرحله ۱: تلاش با yt-dlp (برای فیلم‌ها) =====
         ydl_opts = {
             'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
             'quiet': True,
@@ -120,7 +122,6 @@ def download_instagram_post(url):
         logging.error(f"Download error: {e}")
         return None, f"خطا: {str(e)}"
 
-# ===== بقیه کد (Webhook و ...) مثل قبل =====
 @app.route('/', methods=['POST'])
 def webhook():
     try:
@@ -146,6 +147,7 @@ def webhook():
                         bot.edit_message_text(f"❌ {caption}", chat_id=chat_id, message_id=msg.message_id)
                         return 'OK', 200
                     
+                    # ارسال فایل‌ها
                     for i, f in enumerate(files):
                         try:
                             if os.path.exists(f):

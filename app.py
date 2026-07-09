@@ -17,28 +17,19 @@ if not os.path.exists(DOWNLOAD_DIR):
 
 logging.basicConfig(level=logging.INFO)
 
-def load_cookies():
-    """بارگذاری کوکی از فایل cookies.txt با روش استاندارد"""
-    try:
-        if os.path.exists("cookies.txt"):
-            cookie_jar = cookielib.MozillaCookieJar()
-            cookie_jar.load("cookies.txt", ignore_expires=True, ignore_discard=True)
-            return cookie_jar
-    except Exception as e:
-        logging.error(f"Error loading cookies: {e}")
-    return None
-
 def download_instagram_post(url):
     files = []
     caption = ""
     
+    # استخراج shortcode
     shortcode_match = re.search(r'/(?:p|reel|tv|stories)/([^/?]+)', url)
     if not shortcode_match:
-        return None, "لینک معتبر نیست."
+        return None, "لینک معتبر اینستاگرام نیست."
     shortcode = shortcode_match.group(1)
     logging.info(f"Shortcode: {shortcode}")
     
     try:
+        # ایجاد شیء instaloader
         loader = instaloader.Instaloader(
             download_pictures=True,
             download_videos=True,
@@ -49,17 +40,20 @@ def download_instagram_post(url):
             max_connection_attempts=3
         )
         
-        # بارگذاری کوکی
-        cookie_jar = load_cookies()
-        if cookie_jar:
+        # بارگذاری کوکی (با روش استاندارد)
+        if os.path.exists("cookies.txt"):
+            cookie_jar = cookielib.MozillaCookieJar()
+            cookie_jar.load("cookies.txt", ignore_expires=True, ignore_discard=True)
             loader.context._session.cookies.update(cookie_jar)
             logging.info("✅ Cookies loaded successfully")
         else:
-            logging.warning("⚠️ No cookies found, trying without...")
+            logging.warning("⚠️ cookies.txt not found! Trying without...")
         
+        # دریافت و دانلود پست
         post = instaloader.Post.from_shortcode(loader.context, shortcode)
         loader.download_post(post, target=shortcode)
         
+        # پیدا کردن فایل‌های دانلود شده
         for file in os.listdir('.'):
             if file.startswith(shortcode) and (file.endswith('.jpg') or file.endswith('.png') or file.endswith('.mp4')):
                 files.append(os.path.join('.', file))
@@ -67,10 +61,10 @@ def download_instagram_post(url):
         caption = post.caption if post.caption else ""
         
         if files:
-            logging.info(f"Downloaded {len(files)} files")
+            logging.info(f"✅ Downloaded {len(files)} files")
             return files, caption
         else:
-            return None, "فایلی پیدا نشد."
+            return None, "هیچ فایلی دانلود نشد."
             
     except Exception as e:
         logging.error(f"Download error: {e}")
@@ -86,7 +80,7 @@ def webhook():
             if update.message:
                 chat_id = update.message.chat.id
                 text = update.message.text
-                logging.info(f"Message: {text}")
+                logging.info(f"Message from {chat_id}: {text}")
                 
                 if text and text.startswith('/start'):
                     bot.send_message(chat_id, "سلام! لینک اینستاگرام رو بفرست.")
@@ -100,6 +94,7 @@ def webhook():
                         bot.edit_message_text(f"❌ {caption}", chat_id=chat_id, message_id=msg.message_id)
                         return 'OK', 200
                     
+                    # ارسال فایل‌ها
                     for i, f in enumerate(files):
                         try:
                             if os.path.exists(f):
@@ -111,11 +106,11 @@ def webhook():
                                         bot.send_photo(chat_id, photo, caption=caption if i == 0 else None)
                                 os.remove(f)
                         except Exception as e:
-                            bot.send_message(chat_id, f"خطا: {e}")
+                            bot.send_message(chat_id, f"خطا در ارسال: {e}")
                     
                     bot.edit_message_text("✅ دانلود کامل شد!", chat_id=chat_id, message_id=msg.message_id)
                 else:
-                    bot.send_message(chat_id, "لطفاً لینک اینستاگرام بفرست.")
+                    bot.send_message(chat_id, "❌ لطفاً لینک اینستاگرام بفرست.")
             
             return 'OK', 200
     except Exception as e:

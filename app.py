@@ -4,7 +4,6 @@ import os
 import re
 import instaloader
 import yt_dlp
-import time
 import logging
 
 TOKEN = "8837695158:AAETrphGJh6wS1bmCXHOFB7-r4YPx0n8KR8"
@@ -20,7 +19,6 @@ logging.basicConfig(level=logging.INFO)
 def download_instagram_post(url):
     files = []
     caption = ""
-    
     shortcode_match = re.search(r'/(?:p|reel|tv|stories)/([^/?]+)', url)
     if not shortcode_match:
         return None, "لینک معتبر اینستاگرام نیست."
@@ -66,12 +64,10 @@ def download_instagram_post(url):
         loader.load_cookies_from_txt("cookies.txt")
         post = instaloader.Post.from_shortcode(loader.context, shortcode)
         loader.download_post(post, target=shortcode)
-        
         for file in os.listdir('.'):
             if file.startswith(shortcode) and (file.endswith('.jpg') or file.endswith('.png') or file.endswith('.mp4')):
                 files.append(os.path.join('.', file))
         caption = post.caption if post.caption else ""
-        
         if files:
             return files, caption
         else:
@@ -80,11 +76,9 @@ def download_instagram_post(url):
         logging.error(f"instaloader failed: {e}")
         return None, f"دانلود با مشکل مواجه شد: {str(e)}"
 
-@bot.message_handler(commands=['start'])
 def handle_start(message):
     bot.send_message(message.chat.id, "سلام! به ربات دانلود اینستاگرام خوش آمدید.")
 
-@bot.message_handler(func=lambda message: True)
 def handle_message(message):
     logging.info(f"Received message from {message.chat.id}: {message.text}")
     url = message.text.strip()
@@ -119,7 +113,11 @@ def webhook():
         json_string = request.get_data().decode('utf-8')
         logging.info("Webhook received")
         update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
+        if update.message:
+            if update.message.text and update.message.text.startswith('/start'):
+                handle_start(update.message)
+            else:
+                handle_message(update.message)
         return 'OK', 200
     else:
         return 'Unsupported content type', 400

@@ -6,7 +6,6 @@ import instaloader
 import yt_dlp
 import logging
 import time
-import http.cookiejar as cookielib
 
 TOKEN = "8837695158:AAETrphGJh6wS1bmCXHOFB7-r4YPx0n8KR8"
 bot = telebot.TeleBot(TOKEN)
@@ -18,11 +17,35 @@ if not os.path.exists(DOWNLOAD_DIR):
 
 logging.basicConfig(level=logging.INFO)
 
+# ==================== اطلاعات اکانت اینستاگرام ====================
+INSTAGRAM_USERNAME = "your_username"   # <-- اینجا یوزرنیم خودت رو بذار
+INSTAGRAM_PASSWORD = "your_password"   # <-- اینجا پسورد خودت رو بذار
+# =================================================================
+
+def get_instaloader():
+    """ایجاد یک نمونه از instaloader با لاگین مستقیم"""
+    loader = instaloader.Instaloader(
+        download_pictures=True,
+        download_videos=True,
+        download_video_thumbnails=False,
+        compress_json=False,
+        save_metadata=False,
+        post_metadata_txt_pattern='',
+        max_connection_attempts=3
+    )
+    
+    # لاگین با نام کاربری و رمز عبور
+    try:
+        loader.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+        logging.info("Login successful with username/password")
+    except Exception as e:
+        logging.error(f"Login failed: {e}")
+        # اگر لاگین نشد، بدون لاگین امتحان کن (فقط برای پست‌های عمومی)
+        logging.warning("Trying without login...")
+    
+    return loader
+
 def download_instagram_post(url):
-    """
-    دانلود هر نوع پست اینستاگرام (عکس، فیلم، ریل، پست چندتایی)
-    برمی‌گرداند: (list_of_files, caption) یا (None, error_message)
-    """
     files = []
     caption = ""
     
@@ -33,31 +56,10 @@ def download_instagram_post(url):
     shortcode = shortcode_match.group(1)
     logging.info(f"Shortcode: {shortcode}")
     
-    # ===== روش اول: instaloader (برای همه نوع پست) =====
+    # ===== روش اول: instaloader با لاگین مستقیم =====
     try:
-        logging.info("Trying instaloader...")
-        loader = instaloader.Instaloader(
-            download_pictures=True,
-            download_videos=True,
-            download_video_thumbnails=False,
-            compress_json=False,
-            save_metadata=False,
-            post_metadata_txt_pattern='',
-            max_connection_attempts=3
-        )
-        
-        # ===== روش درست و استاندارد بارگذاری کوکی =====
-        if os.path.exists("cookies.txt"):
-            try:
-                # بارگذاری کوکی با فرمت Netscape
-                cookie_jar = cookielib.MozillaCookieJar()
-                cookie_jar.load('cookies.txt', ignore_expires=True, ignore_discard=True)
-                loader.context._session.cookies.update(cookie_jar)
-                logging.info("Cookies loaded successfully via cookie jar")
-            except Exception as e:
-                logging.warning(f"Could not load cookies: {e}")
-        else:
-            logging.warning("cookies.txt not found! Trying without cookies...")
+        logging.info("Trying instaloader with direct login...")
+        loader = get_instaloader()
         
         # دریافت پست
         post = instaloader.Post.from_shortcode(loader.context, shortcode)
@@ -76,13 +78,11 @@ def download_instagram_post(url):
         
         if files:
             return files, caption
-        else:
-            logging.warning("No files found from instaloader")
             
     except Exception as e:
         logging.error(f"instaloader failed: {e}")
     
-    # ===== روش دوم: yt-dlp (روش جایگزین برای فیلم‌ها) =====
+    # ===== روش دوم: yt-dlp (فقط برای فیلم‌ها) =====
     try:
         logging.info("Trying yt-dlp as fallback...")
         ydl_opts = {
@@ -112,12 +112,11 @@ def download_instagram_post(url):
         if files:
             logging.info(f"Downloaded {len(files)} files with yt-dlp")
             return files, caption
-        else:
-            return None, "با هیچ روشی محتوا دانلود نشد."
             
     except Exception as e:
         logging.error(f"yt-dlp failed: {e}")
-        return None, f"دانلود با مشکل مواجه شد: {str(e)}"
+    
+    return None, "دانلود با مشکل مواجه شد."
 
 @app.route('/', methods=['POST'])
 def webhook():
@@ -136,7 +135,6 @@ def webhook():
                     bot.send_message(chat_id, "سلام! به ربات دانلود اینستاگرام خوش آمدید.\nلینک پست رو بفرست.")
                     return 'OK', 200
                 
-                # پردازش لینک
                 if text and ('instagram.com' in text or 'instagr.am' in text):
                     msg = bot.send_message(chat_id, "⏳ در حال دانلود...")
                     
@@ -146,7 +144,6 @@ def webhook():
                         bot.edit_message_text(f"❌ خطا: {caption}", chat_id=chat_id, message_id=msg.message_id)
                         return 'OK', 200
                     
-                    # ارسال فایل‌ها
                     for i, f in enumerate(files):
                         try:
                             if os.path.exists(f):

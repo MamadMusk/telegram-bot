@@ -22,16 +22,15 @@ logging.basicConfig(level=logging.INFO)
 
 def download_with_gallery_dl(url, output_dir):
     """
-    دانلود با gallery-dl و برگرداندن لیست فایل‌های دانلود شده
+    دانلود با gallery-dl با دریافت خودکار کوکی از مرورگر
     """
     try:
-        # تنظیمات gallery-dl برای خروجی
+        # تنظیمات gallery-dl برای دریافت کوکی از مرورگر
         config = {
             "extractor": {
                 "instagram": {
-                    "cookies": "cookies.txt" if os.path.exists("cookies.txt") else None,
-                    "posts": "metadata",
-                    "archive": None,
+                    "cookies": ["firefox"],  # یا ["chrome"] اگر از کروم استفاده می‌کنی
+                    "cookies-update": True,  # کوکی رو هر بار از مرورگر می‌گیره
                 }
             },
             "output": {
@@ -40,7 +39,7 @@ def download_with_gallery_dl(url, output_dir):
             }
         }
         
-        # اجرای gallery-dl و گرفتن خروجی
+        # اجرای gallery-dl
         f = StringIO()
         with contextlib.redirect_stderr(f), contextlib.redirect_stdout(f):
             gallery_dl.download([url], config, False)
@@ -75,8 +74,7 @@ def download_instagram_post(url):
             'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
             'quiet': True,
             'no_warnings': False,
-            'cookiefile': 'cookies.txt' if os.path.exists("cookies.txt") else None,
-            'format': 'best[ext=mp4]/best',  # اولویت با mp4
+            'format': 'best[ext=mp4]/best',
             'ignoreerrors': True,
             'extract_flat': False,
         }
@@ -122,6 +120,7 @@ def download_instagram_post(url):
         logging.error(f"Download error: {e}")
         return None, f"خطا: {str(e)}"
 
+# ===== بقیه کد (Webhook و ...) مثل قبل =====
 @app.route('/', methods=['POST'])
 def webhook():
     try:
@@ -147,7 +146,6 @@ def webhook():
                         bot.edit_message_text(f"❌ {caption}", chat_id=chat_id, message_id=msg.message_id)
                         return 'OK', 200
                     
-                    # ارسال فایل‌ها
                     for i, f in enumerate(files):
                         try:
                             if os.path.exists(f):

@@ -8,7 +8,7 @@ app = Flask(__name__)
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "سلام! ربات من روشنه! 🎉")
+    bot.reply_to(message, "سلام! ربات روشنه! 🎉")
 
 @bot.message_handler(func=lambda message: True)
 def echo_all(message):

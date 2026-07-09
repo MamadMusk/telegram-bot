@@ -6,7 +6,6 @@ import yt_dlp
 import logging
 import time
 import subprocess
-import shutil
 
 TOKEN = "8837695158:AAETrphGJh6wS1bmCXHOFB7-r4YPx0n8KR8"
 bot = telebot.TeleBot(TOKEN)
@@ -20,28 +19,30 @@ logging.basicConfig(level=logging.INFO)
 
 def download_with_gallery_dl(url, output_dir):
     """
-    دانلود با gallery-dl از طریق خط فرمان (subprocess)
+    دانلود با gallery-dl با استفاده از فایل cookies.txt
     """
     try:
-        # تنظیمات خط فرمان برای gallery-dl
+        # اگه فایل کوکی وجود نداشت، از روش بدون کوکی امتحان کن
+        cookie_option = []
+        if os.path.exists("cookies.txt"):
+            cookie_option = ["--cookies", "cookies.txt"]
+            logging.info("✅ Using cookies.txt")
+        else:
+            logging.warning("⚠️ cookies.txt not found, trying without cookies")
+        
         cmd = [
             "gallery-dl",
-            "--cookies-from-browser", "firefox",  # اگه کروم داری، به chrome تغییر بده
             "-D", output_dir,
             "-o", "filename={shortcode}_{num}.{extension}",
-            url
-        ]
+        ] + cookie_option + [url]
         
         logging.info(f"Running: {' '.join(cmd)}")
         
-        # اجرا و گرفتن خروجی
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         
         if result.returncode != 0:
             logging.error(f"gallery-dl failed: {result.stderr}")
             return None
-        
-        logging.info(f"gallery-dl stdout: {result.stdout}")
         
         # پیدا کردن فایل‌های دانلود شده
         downloaded_files = []
@@ -54,7 +55,6 @@ def download_with_gallery_dl(url, output_dir):
             logging.info(f"✅ gallery-dl downloaded {len(downloaded_files)} files")
             return downloaded_files
         else:
-            logging.warning("⚠️ gallery-dl didn't download any files")
             return None
             
     except subprocess.TimeoutExpired:
@@ -65,20 +65,17 @@ def download_with_gallery_dl(url, output_dir):
         return None
 
 def download_instagram_post(url):
-    """
-    دانلود با اولویت yt-dlp و fallback به gallery-dl
-    """
     try:
         logging.info(f"Downloading: {url}")
         
-        # ===== مرحله ۱: تلاش با yt-dlp (برای فیلم‌ها) =====
+        # ===== مرحله ۱: yt-dlp (برای فیلم‌ها) =====
         ydl_opts = {
             'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
             'quiet': True,
             'no_warnings': False,
+            'cookiefile': 'cookies.txt' if os.path.exists("cookies.txt") else None,
             'format': 'best[ext=mp4]/best',
             'ignoreerrors': True,
-            'extract_flat': False,
         }
         
         try:
@@ -109,14 +106,14 @@ def download_instagram_post(url):
         except Exception as e:
             logging.warning(f"yt-dlp failed: {e}")
         
-        # ===== مرحله ۲: Fallback به gallery-dl =====
+        # ===== مرحله ۲: gallery-dl (برای عکس‌ها) =====
         logging.info("Trying gallery-dl as fallback...")
         files = download_with_gallery_dl(url, DOWNLOAD_DIR)
         
         if files:
             return files, ""
         else:
-            return None, "هیچ محتوایی برای دانلود پیدا نشد (ممکنه پست خصوصی یا حذف شده باشه)."
+            return None, "هیچ محتوایی برای دانلود پیدا نشد. مطمئن شو فایل cookies.txt معتبر هست و پست عمومی هست."
             
     except Exception as e:
         logging.error(f"Download error: {e}")
@@ -147,7 +144,6 @@ def webhook():
                         bot.edit_message_text(f"❌ {caption}", chat_id=chat_id, message_id=msg.message_id)
                         return 'OK', 200
                     
-                    # ارسال فایل‌ها
                     for i, f in enumerate(files):
                         try:
                             if os.path.exists(f):
@@ -161,7 +157,6 @@ def webhook():
                                 logging.info(f"Sent and removed: {f}")
                         except Exception as e:
                             logging.error(f"Error sending {f}: {e}")
-                            bot.send_message(chat_id, f"خطا در ارسال فایل: {e}")
                     
                     bot.edit_message_text("✅ دانلود کامل شد!", chat_id=chat_id, message_id=msg.message_id)
                 else:

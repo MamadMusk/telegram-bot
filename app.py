@@ -2,9 +2,10 @@ from flask import Flask, request
 import telebot
 import os
 import re
-import yt_dlp
+import instaloader
 import logging
 import time
+import http.cookiejar as cookielib
 
 TOKEN = "8837695158:AAETrphGJh6wS1bmCXHOFB7-r4YPx0n8KR8"
 bot = telebot.TeleBot(TOKEN)
@@ -16,50 +17,63 @@ if not os.path.exists(DOWNLOAD_DIR):
 
 logging.basicConfig(level=logging.INFO)
 
-def download_instagram_post(url):
-    """
-    دانلود با yt-dlp (هم عکس و هم فیلم)
-    """
+def load_cookies():
+    """بارگذاری کوکی از فایل cookies.txt با روش استاندارد"""
     try:
-        logging.info(f"Downloading: {url}")
-        
-        ydl_opts = {
-            'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
-            'quiet': False,
-            'no_warnings': False,
-            'cookiefile': 'cookies.txt',  # حتماً کوکی معتبر باشه
-            'format': 'best',  # بهترین کیفیت رو بگیر (چه عکس چه فیلم)
-            'ignoreerrors': True,
-        }
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            
-            files = []
-            caption = ""
-            
-            if info:
-                if 'entries' in info:
-                    for entry in info['entries']:
-                        if entry:
-                            filename = ydl.prepare_filename(entry)
-                            if os.path.exists(filename):
-                                files.append(filename)
-                    caption = info.get('description', '')
-                else:
-                    filename = ydl.prepare_filename(info)
-                    if os.path.exists(filename):
-                        files.append(filename)
-                    caption = info.get('description', '')
-            
-            if files:
-                logging.info(f"Downloaded {len(files)} files")
-                return files, caption
-            else:
-                return None, "هیچ فایلی دانلود نشد."
-                
+        if os.path.exists("cookies.txt"):
+            cookie_jar = cookielib.MozillaCookieJar()
+            cookie_jar.load("cookies.txt", ignore_expires=True, ignore_discard=True)
+            return cookie_jar
     except Exception as e:
-        logging.error(f"yt-dlp error: {e}")
+        logging.error(f"Error loading cookies: {e}")
+    return None
+
+def download_instagram_post(url):
+    files = []
+    caption = ""
+    
+    shortcode_match = re.search(r'/(?:p|reel|tv|stories)/([^/?]+)', url)
+    if not shortcode_match:
+        return None, "لینک معتبر نیست."
+    shortcode = shortcode_match.group(1)
+    logging.info(f"Shortcode: {shortcode}")
+    
+    try:
+        loader = instaloader.Instaloader(
+            download_pictures=True,
+            download_videos=True,
+            download_video_thumbnails=False,
+            compress_json=False,
+            save_metadata=False,
+            post_metadata_txt_pattern='',
+            max_connection_attempts=3
+        )
+        
+        # بارگذاری کوکی
+        cookie_jar = load_cookies()
+        if cookie_jar:
+            loader.context._session.cookies.update(cookie_jar)
+            logging.info("✅ Cookies loaded successfully")
+        else:
+            logging.warning("⚠️ No cookies found, trying without...")
+        
+        post = instaloader.Post.from_shortcode(loader.context, shortcode)
+        loader.download_post(post, target=shortcode)
+        
+        for file in os.listdir('.'):
+            if file.startswith(shortcode) and (file.endswith('.jpg') or file.endswith('.png') or file.endswith('.mp4')):
+                files.append(os.path.join('.', file))
+        
+        caption = post.caption if post.caption else ""
+        
+        if files:
+            logging.info(f"Downloaded {len(files)} files")
+            return files, caption
+        else:
+            return None, "فایلی پیدا نشد."
+            
+    except Exception as e:
+        logging.error(f"Download error: {e}")
         return None, f"خطا: {str(e)}"
 
 @app.route('/', methods=['POST'])
@@ -80,7 +94,6 @@ def webhook():
                 
                 if text and 'instagram.com' in text:
                     msg = bot.send_message(chat_id, "⏳ در حال دانلود...")
-                    
                     files, caption = download_instagram_post(text)
                     
                     if files is None:
@@ -90,7 +103,7 @@ def webhook():
                     for i, f in enumerate(files):
                         try:
                             if os.path.exists(f):
-                                if f.endswith(('.mp4', '.MP4')):
+                                if f.endswith('.mp4'):
                                     with open(f, 'rb') as video:
                                         bot.send_video(chat_id, video, caption=caption if i == 0 else None)
                                 else:
@@ -98,15 +111,13 @@ def webhook():
                                         bot.send_photo(chat_id, photo, caption=caption if i == 0 else None)
                                 os.remove(f)
                         except Exception as e:
-                            bot.send_message(chat_id, f"خطا در ارسال: {e}")
+                            bot.send_message(chat_id, f"خطا: {e}")
                     
-                    bot.edit_message_text("✅ دانلود و ارسال کامل شد!", chat_id=chat_id, message_id=msg.message_id)
+                    bot.edit_message_text("✅ دانلود کامل شد!", chat_id=chat_id, message_id=msg.message_id)
                 else:
                     bot.send_message(chat_id, "لطفاً لینک اینستاگرام بفرست.")
             
             return 'OK', 200
-        else:
-            return 'Unsupported', 400
     except Exception as e:
         logging.error(f"Webhook error: {e}")
         return 'Error', 500

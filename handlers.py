@@ -200,16 +200,17 @@ def show_admin_permissions(bot, chat_id, admin_id, message_id=None, current_user
         name = admin_info.get('first_name', 'Unknown') if admin_info else 'Unknown'
         role = get_admin_role(admin_id) or 'viewer'
         
-        text = MESSAGES["admin_permissions_header"].format(
-            name=name,
-            user_id=admin_id,
-            role=role,
-            stats="✅" if perms.get("can_view_stats", False) else "❌",
-            broadcast="✅" if perms.get("can_send_broadcast", False) else "❌",
-            force_sub="✅" if perms.get("can_manage_force_sub", False) else "❌",
-            settings="✅" if perms.get("can_manage_settings", False) else "❌",
-            admins="✅" if perms.get("can_manage_admins", False) else "❌"
-        )
+        text = f"""🔐 <b>دسترسی‌های ادمین</b>
+
+👤 {name} (ID: {admin_id})
+📋 نقش: {role}
+
+• مشاهده آمار: {"✅" if perms.get("can_view_stats", False) else "❌"}
+• ارسال همگانی: {"✅" if perms.get("can_send_broadcast", False) else "❌"}
+• قفل اسپانسر: {"✅" if perms.get("can_manage_force_sub", False) else "❌"}
+• تنظیمات: {"✅" if perms.get("can_manage_settings", False) else "❌"}
+• مدیریت ادمین‌ها: {"✅" if perms.get("can_manage_admins", False) else "❌"}
+"""
         keyboard = get_admin_permissions_keyboard(admin_id, perms, is_owner=False)
         
         if message_id:
@@ -414,9 +415,13 @@ def handle_callback_query(bot, call, user_data):
         return
     
     elif data.startswith("admin_perm_toggle_"):
-        parts = data.split("_")
+        # ===== اصلاح: استفاده از split با maxsplit=4 =====
+        parts = data.split('_', 4)  # ['admin', 'perm', 'toggle', '8560242593', 'can_send_broadcast']
+        if len(parts) < 5:
+            logging.error(f"Invalid callback data: {data}")
+            return
         admin_id = int(parts[3])
-        perm_key = parts[4]
+        perm_key = parts[4]  # کلید کامل مثلاً 'can_send_broadcast'
         
         logging.info(f"🔄 Toggle permission: {perm_key} for admin {admin_id}")
         

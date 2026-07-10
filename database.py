@@ -88,6 +88,8 @@ def init_db() -> None:
             ("daily_quota", "10"),
             ("broadcast_in_progress", "False"),
             ("force_channels", ""),
+            ("rate_limit_enabled", "False"),
+            ("rate_limit_seconds", "30"),
         ]
         c.executemany("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", defaults)
         for admin_id in ADMIN_IDS:
@@ -194,15 +196,12 @@ def get_downloads_paginated(page: int = 1, size: int = 50) -> Tuple[List[Dict[st
         return [dict(r) for r in rows], total
 
 def increment_download(user_id: int) -> None:
-    """افزایش تعداد دانلودهای امروز برای کاربر خاص"""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     with _write_lock, get_conn() as conn:
-        # ثبت در جدول downloads
         conn.execute(
             "INSERT INTO downloads (user_id, post_url, platform, status) VALUES (?, '', 'instagram', 'success')",
             (user_id,)
         )
-        # بروزرسانی quota روزانه
         conn.execute(
             """
             INSERT INTO daily_quota (user_id, quota_date, count)
@@ -386,6 +385,30 @@ def remove_force_channel(channel: str) -> bool:
         set_force_channels_list(channels)
         return True
     return False
+
+# ============================================================
+#  ⏱️ محدودیت زمانی (Rate Limit)
+# ============================================================
+def get_rate_limit_enabled() -> bool:
+    """دریافت وضعیت فعال بودن محدودیت زمانی"""
+    val = get_setting("rate_limit_enabled", "False")
+    return val.lower() == "true"
+
+def set_rate_limit_enabled(enabled: bool) -> None:
+    """تنظیم وضعیت فعال بودن محدودیت زمانی"""
+    set_setting("rate_limit_enabled", "True" if enabled else "False")
+
+def get_rate_limit_seconds() -> int:
+    """دریافت زمان انتظار به ثانیه"""
+    val = get_setting("rate_limit_seconds", "30")
+    try:
+        return int(val)
+    except:
+        return 30
+
+def set_rate_limit_seconds(seconds: int) -> None:
+    """تنظیم زمان انتظار به ثانیه"""
+    set_setting("rate_limit_seconds", str(seconds))
 
 # ============================================================
 #  Broadcast

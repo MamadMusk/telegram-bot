@@ -126,7 +126,14 @@ def show_stats(bot, chat_id, message_id=None):
         )
         keyboard = get_stats_refresh_keyboard()
         if message_id:
-            bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
+            try:
+                bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
+            except Exception as e:
+                # اگر پیام تغییری نکرده بود، فقط نوتیف می‌دیم
+                if "message is not modified" in str(e):
+                    bot.answer_callback_query(message_id, "🔄 آمار به‌روز است!", show_alert=False)
+                else:
+                    raise e
         else:
             bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=keyboard)
     except Exception as e:
@@ -200,11 +207,9 @@ def handle_callback_query(bot, call, user_data):
         bot.answer_callback_query(call.id, "⛔ شما دسترسی ادمین ندارید!", show_alert=True)
         return
     
-    bot.answer_callback_query(call.id)
-    
     # بروزرسانی آمار
     if data == "refresh_stats":
-        bot.answer_callback_query(call.id, "🔄 آمار بروزرسانی شد!", show_alert=False)
+        bot.answer_callback_query(call.id, "🔄 در حال بروزرسانی...", show_alert=False)
         show_stats(bot, chat_id, message_id)
         return
     
@@ -266,14 +271,18 @@ def handle_callback_query(bot, call, user_data):
         show_settings(bot, chat_id, message_id)
         return
     
-    # ارسال همگانی
+    # ===== ارسال همگانی =====
     elif data == "broadcast_confirm":
         bot.answer_callback_query(call.id, "📨 در حال ارسال...", show_alert=False)
-        data_obj = user_data.get(user_id, {})
+        
+        # دریافت داده‌های ذخیره شده برای این کاربر
+        data_obj = user_data.get(user_id, {})  # توجه: اینجا user_id درسته!
         broadcast_text = data_obj.get('broadcast_message', '')
+        
         if not broadcast_text:
             bot.send_message(user_id, "❌ پیامی برای ارسال وجود ندارد.")
             return
+        
         users = get_all_users()
         success_count = 0
         for user in users:
@@ -283,10 +292,13 @@ def handle_callback_query(bot, call, user_data):
                 time.sleep(0.05)
             except Exception as e:
                 logging.error(f"Failed to send to {user['user_id']}: {e}")
+        
+        # حذف دکمه‌های تأیید
         try:
             bot.edit_message_reply_markup(chat_id, data_obj.get('message_id'), reply_markup=None)
         except:
             pass
+        
         bot.send_message(user_id, MESSAGES["broadcast_success"].format(count=success_count))
         if user_id in user_data:
             del user_data[user_id]
@@ -416,7 +428,8 @@ def handle_message(bot, message, user_data):
             preview_text = MESSAGES["broadcast_preview"].format(message=broadcast_text, count=count)
             keyboard = get_confirm_keyboard()
             msg = bot.send_message(chat_id, preview_text, reply_markup=keyboard, parse_mode='HTML')
-            user_data[chat_id] = {'broadcast_message': broadcast_text, 'message_id': msg.message_id}
+            # ذخیره پیام با کلید user_id (نه chat_id)
+            user_data[user_id] = {'broadcast_message': broadcast_text, 'message_id': msg.message_id}
         return
     
     # /start

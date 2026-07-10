@@ -10,14 +10,17 @@ from messages import (
     MESSAGES, get_admin_keyboard, get_user_keyboard,
     get_force_sub_keyboard, get_confirm_keyboard,
     get_stats_refresh_keyboard, get_admin_list_inline_keyboard,
-    get_settings_inline_keyboard, get_force_sub_inline_keyboard
+    get_settings_inline_keyboard, get_force_sub_inline_keyboard,
+    get_rate_limit_keyboard
 )
 from database import (
     add_user, get_all_users, get_stats,
     increment_download, get_total_downloads,
     get_force_channels_list, add_force_channel, remove_force_channel,
     get_all_admins, add_admin, remove_admin,
-    set_setting, get_setting
+    set_setting, get_setting,
+    get_rate_limit_enabled, set_rate_limit_enabled,
+    get_rate_limit_seconds, set_rate_limit_seconds
 )
 
 # ===================================================
@@ -111,6 +114,27 @@ def download_instagram_post(url, user_id):
         return None, str(e)
 
 # ===================================================
+# ⏱️ محدودیت زمانی
+# ===================================================
+def show_rate_limit_settings(bot, chat_id, message_id=None):
+    try:
+        enabled = get_rate_limit_enabled()
+        seconds = get_rate_limit_seconds()
+        
+        text = MESSAGES["rate_limit_status"].format(
+            status="🟢 فعال" if enabled else "🔴 غیرفعال",
+            seconds=seconds
+        )
+        keyboard = get_rate_limit_keyboard()
+        
+        if message_id:
+            bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
+        else:
+            bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=keyboard)
+    except Exception as e:
+        logging.error(f"Error in show_rate_limit_settings: {e}")
+
+# ===================================================
 # 📊 توابع ادمین
 # ===================================================
 def show_stats(bot, chat_id, message_id=None):
@@ -129,7 +153,6 @@ def show_stats(bot, chat_id, message_id=None):
             try:
                 bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
             except Exception as e:
-                # اگر پیام تغییری نکرده بود، فقط نوتیف می‌دیم
                 if "message is not modified" in str(e):
                     bot.answer_callback_query(message_id, "🔄 آمار به‌روز است!", show_alert=False)
                 else:
@@ -271,18 +294,45 @@ def handle_callback_query(bot, call, user_data):
         show_settings(bot, chat_id, message_id)
         return
     
+    # ===== محدودیت زمانی =====
+    elif data == "setting_rate_limit":
+        bot.answer_callback_query(call.id, "⏱️ تنظیمات محدودیت زمانی", show_alert=False)
+        show_rate_limit_settings(bot, chat_id, message_id)
+        return
+    
+    elif data == "rate_limit_enable":
+        set_rate_limit_enabled(True)
+        seconds = get_rate_limit_seconds()
+        bot.answer_callback_query(call.id, f"✅ محدودیت زمانی فعال شد! ({seconds} ثانیه)", show_alert=True)
+        show_rate_limit_settings(bot, chat_id, message_id)
+        return
+    
+    elif data == "rate_limit_disable":
+        set_rate_limit_enabled(False)
+        bot.answer_callback_query(call.id, "❌ محدودیت زمانی غیرفعال شد!", show_alert=True)
+        show_rate_limit_settings(bot, chat_id, message_id)
+        return
+    
+    elif data.startswith("rate_limit_"):
+        seconds = int(data.replace("rate_limit_", ""))
+        set_rate_limit_seconds(seconds)
+        # اگر غیرفعال بود، فعالش کن
+        if not get_rate_limit_enabled():
+            set_rate_limit_enabled(True)
+            bot.answer_callback_query(call.id, f"✅ محدودیت زمانی فعال شد! زمان انتظار: {seconds} ثانیه", show_alert=True)
+        else:
+            bot.answer_callback_query(call.id, f"⏱️ زمان انتظار به {seconds} ثانیه تغییر کرد!", show_alert=True)
+        show_rate_limit_settings(bot, chat_id, message_id)
+        return
+    
     # ===== ارسال همگانی =====
     elif data == "broadcast_confirm":
         bot.answer_callback_query(call.id, "📨 در حال ارسال...", show_alert=False)
-        
-        # دریافت داده‌های ذخیره شده برای این کاربر
-        data_obj = user_data.get(user_id, {})  # توجه: اینجا user_id درسته!
+        data_obj = user_data.get(user_id, {})
         broadcast_text = data_obj.get('broadcast_message', '')
-        
         if not broadcast_text:
             bot.send_message(user_id, "❌ پیامی برای ارسال وجود ندارد.")
             return
-        
         users = get_all_users()
         success_count = 0
         for user in users:
@@ -292,13 +342,10 @@ def handle_callback_query(bot, call, user_data):
                 time.sleep(0.05)
             except Exception as e:
                 logging.error(f"Failed to send to {user['user_id']}: {e}")
-        
-        # حذف دکمه‌های تأیید
         try:
             bot.edit_message_reply_markup(chat_id, data_obj.get('message_id'), reply_markup=None)
         except:
             pass
-        
         bot.send_message(user_id, MESSAGES["broadcast_success"].format(count=success_count))
         if user_id in user_data:
             del user_data[user_id]
@@ -338,7 +385,7 @@ def handle_callback_query(bot, call, user_data):
 # ===================================================
 # 📨 پردازش پیام
 # ===================================================
-def handle_message(bot, message, user_data):
+def handle_message(bot, message, user_data, user_last_download):
     chat_id = message.chat.id
     user_id = message.from_user.id
     text = message.text
@@ -428,7 +475,6 @@ def handle_message(bot, message, user_data):
             preview_text = MESSAGES["broadcast_preview"].format(message=broadcast_text, count=count)
             keyboard = get_confirm_keyboard()
             msg = bot.send_message(chat_id, preview_text, reply_markup=keyboard, parse_mode='HTML')
-            # ذخیره پیام با کلید user_id (نه chat_id)
             user_data[user_id] = {'broadcast_message': broadcast_text, 'message_id': msg.message_id}
         return
     
@@ -461,13 +507,33 @@ def handle_message(bot, message, user_data):
             show_settings(bot, chat_id)
             return
     
-    # لینک اینستاگرام
+    # ===== لینک اینستاگرام با محدودیت زمانی =====
     if text and 'instagram.com' in text:
+        # ===== چک کردن محدودیت زمانی =====
+        if get_rate_limit_enabled():
+            seconds = get_rate_limit_seconds()
+            last_download = user_last_download.get(user_id, 0)
+            elapsed = time.time() - last_download
+            
+            if elapsed < seconds:
+                remaining = int(seconds - elapsed)
+                bot.send_message(
+                    chat_id,
+                    MESSAGES["rate_limit_wait"].format(seconds=seconds, remaining=remaining)
+                )
+                return
+        
+        # ===== ادامه دانلود =====
         msg = bot.send_message(chat_id, MESSAGES["downloading"])
         files, error = download_instagram_post(text, user_id)
+        
         if not files:
             bot.edit_message_text(f"❌ {error}", chat_id, msg.message_id)
             return
+        
+        # ===== به‌روزرسانی زمان آخرین دانلود =====
+        user_last_download[user_id] = time.time()
+        
         for f in files:
             try:
                 with open(f, 'rb') as media:

@@ -1,73 +1,27 @@
 """
-config.py — تنظیمات اصلی ربات با pydantic
+config.py — تنظیمات اصلی ربات (بدون وابستگی به pydantic)
 """
 
 import os
 from typing import List, Optional
-from pydantic import BaseModel, field_validator
 
+# ===== تنظیمات اصلی (از env) =====
+TOKEN = os.getenv("BOT_TOKEN", "8837695158:AAETrphGJh6wS1bmCXHOFB7-r4YPx0n8KR8")
 
-class Settings(BaseModel):
-    """مدل تنظیمات با اعتبارسنجی خودکار"""
-    
-    TOKEN: str = "8837695158:AAETrphGJh6wS1bmCXHOFB7-r4YPx0n8KR8"
-    ADMIN_IDS: List[int] = []
-    DB_PATH: str = "users.db"
-    DOWNLOAD_DIR: str = "downloads"
+# ===== آیدی ادمین‌های اصلی (از env) =====
+ADMIN_IDS_STR = os.getenv("ADMIN_IDS", "1085150385")
+ADMIN_IDS: List[int] = [
+    int(x.strip()) for x in ADMIN_IDS_STR.split(",")
+    if x.strip().isdigit()
+]
 
-    @field_validator("ADMIN_IDS", mode="before")
-    @classmethod
-    def parse_admin_ids(cls, v):
-        """تبدیل رشته‌ی ADMIN_IDS به لیست اعداد"""
-        if isinstance(v, str):
-            return [int(x.strip()) for x in v.split(",") if x.strip().isdigit()]
-        return v
+# ===== مسیر دیتابیس =====
+DB_PATH = os.getenv("DB_PATH", "users.db")
 
+# ===== مسیر ذخیره فایل‌های دانلود =====
+DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "downloads")
 
-# ===== خواندن از محیط (Environment Variables) =====
-_settings = Settings(
-    TOKEN=os.getenv("BOT_TOKEN", "8837695158:AAETrphGJh6wS1bmCXHOFB7-r4YPx0n8KR8"),
-    ADMIN_IDS=os.getenv("ADMIN_IDS", "1085150385"),
-    DB_PATH=os.getenv("DB_PATH", "users.db"),
-    DOWNLOAD_DIR=os.getenv("DOWNLOAD_DIR", "downloads"),
-)
-
-# ===== صادر کردن متغیرها =====
-TOKEN = _settings.TOKEN
-ADMIN_IDS = _settings.ADMIN_IDS
-DB_PATH = _settings.DB_PATH
-DOWNLOAD_DIR = _settings.DOWNLOAD_DIR
-
-# ============================================================
-#  🔍 توابع کمکی (مشابه قبل)
-# ============================================================
-
-def is_admin(user_id: int) -> bool:
-    """بررسی ادمین بودن کاربر (از env یا دیتابیس)"""
-    if user_id in ADMIN_IDS:
-        return True
-    try:
-        from database import is_admin as db_is_admin
-        return db_is_admin(user_id)
-    except Exception:
-        return False
-
-
-def is_super_admin(user_id: int) -> bool:
-    """بررسی ادمین اصلی بودن"""
-    if user_id in ADMIN_IDS:
-        return True
-    try:
-        from database import is_super_admin as db_is_super
-        return db_is_super(user_id)
-    except Exception:
-        return False
-
-
-# ============================================================
-#  📦 تنظیمات پیش‌فرض برای fallback
-# ============================================================
-
+# ===== تنظیمات پیش‌فرض (برای fallback) =====
 DEFAULT_SETTINGS = {
     "welcome_message": "👋 سلام! به ربات دانلود اینستاگرام خوش آمدید.\n\nلینک پست یا ریلز اینستاگرام را بفرستید تا آن را برایتان دانلود کنم.",
     "daily_quota": "10",
@@ -77,9 +31,12 @@ DEFAULT_SETTINGS = {
     "force_channels": "",
 }
 
+# ============================================================
+#  🔍 توابع کمکی برای خواندن تنظیمات از دیتابیس
+# ============================================================
 
 def get_db_setting(key: str, default: Optional[str] = None) -> str:
-    """خواندن یک تنظیم از دیتابیس"""
+    """خواندن یک تنظیم از دیتابیس."""
     try:
         from database import get_setting as db_get
         val = db_get(key)
@@ -105,6 +62,28 @@ def get_db_setting_bool(key: str, default: bool = False) -> bool:
     if val is None:
         return default
     return val.lower() in ("true", "1", "yes", "on")
+
+
+def is_admin(user_id: int) -> bool:
+    """بررسی ادمین بودن کاربر (از env یا دیتابیس)"""
+    if user_id in ADMIN_IDS:
+        return True
+    try:
+        from database import is_admin as db_is_admin
+        return db_is_admin(user_id)
+    except Exception:
+        return False
+
+
+def is_super_admin(user_id: int) -> bool:
+    """بررسی ادمین اصلی بودن (از env یا role='super')"""
+    if user_id in ADMIN_IDS:
+        return True
+    try:
+        from database import is_super_admin as db_is_super
+        return db_is_super(user_id)
+    except Exception:
+        return False
 
 
 def get_force_channels() -> List[str]:

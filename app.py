@@ -7,20 +7,17 @@ import time
 import re
 import requests
 
-# ===== ایمپورت‌های جدید =====
-from config import TOKEN, ADMIN_IDS, DOWNLOAD_DIR, is_admin
+from config import TOKEN, ADMIN_IDS, DOWNLOAD_DIR, is_admin, get_db_setting
 from messages import (
-    MESSAGES, get_admin_keyboard, get_user_keyboard, 
-    get_admin_inline_keyboard, get_force_sub_keyboard, 
-    get_confirm_keyboard, get_admin_actions_keyboard, COMMANDS
+    MESSAGES, get_admin_keyboard, get_user_keyboard,
+    get_force_sub_keyboard, get_confirm_keyboard, COMMANDS
 )
 from database import (
-    add_user, get_all_users, get_user_count, get_stats, 
-    increment_download, get_total_downloads, 
-    get_setting, set_setting,
+    add_user, get_all_users, get_stats,
+    increment_download, get_total_downloads,
     get_force_channels_list, add_force_channel, remove_force_channel,
     get_all_admins, add_admin, remove_admin, is_super_admin,
-    get_all_users_count
+    get_all_users_count, set_setting, get_setting
 )
 
 bot = telebot.TeleBot(TOKEN)
@@ -129,100 +126,9 @@ def download_instagram_post(url):
         return None, str(e)
 
 # ===================================================
-# 🤖 هندلرهای پیام
-# ===================================================
-@bot.message_handler(commands=['start'])
-def handle_start(message):
-    user_id = message.from_user.id
-    add_user(user_id, message.from_user.username, message.from_user.first_name, message.from_user.last_name)
-    
-    if not is_admin(user_id):
-        is_subscribed, not_subscribed = check_user_subscription(user_id)
-        if not is_subscribed:
-            channels_text = "\n".join([f"• {ch}" for ch in not_subscribed])
-            keyboard = get_force_sub_keyboard(not_subscribed)
-            bot.send_message(
-                user_id, 
-                MESSAGES["force_sub_required"].format(channels=channels_text),
-                reply_markup=keyboard
-            )
-            return
-    
-    if is_admin(user_id):
-        keyboard = get_admin_keyboard()
-    else:
-        keyboard = get_user_keyboard()
-    
-    bot.send_message(user_id, MESSAGES["start"], reply_markup=keyboard)
-
-@bot.message_handler(func=lambda message: True)
-def handle_message(message):
-    user_id = message.from_user.id
-    text = message.text
-    
-    add_user(user_id, message.from_user.username, message.from_user.first_name, message.from_user.last_name)
-    
-    # ===== بررسی عضویت اجباری =====
-    if not is_admin(user_id):
-        is_subscribed, not_subscribed = check_user_subscription(user_id)
-        if not is_subscribed:
-            channels_text = "\n".join([f"• {ch}" for ch in not_subscribed])
-            keyboard = get_force_sub_keyboard(not_subscribed)
-            bot.send_message(
-                user_id, 
-                MESSAGES["force_sub_required"].format(channels=channels_text),
-                reply_markup=keyboard
-            )
-            return
-    
-    # ===== دکمه‌های ادمین =====
-    if is_admin(user_id):
-        if text == "📊 آمار ربات":
-            show_stats(message)
-            return
-        elif text == "📨 ارسال همگانی":
-            start_broadcast(message)
-            return
-        elif text == "🔒 قفل اسپانسر":
-            show_force_sub_settings(message)
-            return
-        elif text == "📋 مدیریت ادمین‌ها":
-            show_admin_list(message)
-            return
-        elif text == "⚙️ تنظیمات ربات":
-            show_settings(message)
-            return
-        elif text == "🔙 بازگشت":
-            bot.send_message(user_id, MESSAGES["start"], reply_markup=get_admin_keyboard())
-            return
-    
-    # ===== پردازش لینک =====
-    if 'instagram.com' in text:
-        msg = bot.send_message(user_id, MESSAGES["downloading"])
-        files, error = download_instagram_post(text)
-        if not files:
-            bot.edit_message_text(f"❌ {error}", user_id, msg.message_id)
-            return
-        for f in files:
-            try:
-                with open(f, 'rb') as media:
-                    if f.endswith('.mp4'):
-                        bot.send_video(user_id, media, caption=MESSAGES["caption"])
-                    else:
-                        bot.send_photo(user_id, media, caption=MESSAGES["caption"])
-                    os.remove(f)
-            except Exception as e:
-                bot.send_message(user_id, MESSAGES["send_error"].format(error=str(e)))
-        bot.delete_message(user_id, msg.message_id)
-    else:
-        if not is_admin(user_id):
-            bot.send_message(user_id, MESSAGES["invalid_link"])
-
-# ===================================================
 # 📊 توابع ادمین
 # ===================================================
-def show_stats(message):
-    user_id = message.chat.id
+def show_stats(chat_id):
     stats = get_stats()
     total_downloads = get_total_downloads()
     text = MESSAGES["stats_text"].format(
@@ -232,98 +138,37 @@ def show_stats(message):
         month=stats['month'],
         downloads=total_downloads
     )
-    bot.send_message(user_id, text, parse_mode='Markdown')
+    bot.send_message(chat_id, text, parse_mode='Markdown')
 
-# ===== ارسال همگانی =====
-def start_broadcast(message):
-    user_id = message.chat.id
-    msg = bot.send_message(user_id, MESSAGES["broadcast_prompt"])
+def start_broadcast(chat_id, message_obj):
+    msg = bot.send_message(chat_id, MESSAGES["broadcast_prompt"])
     bot.register_next_step_handler(msg, process_broadcast_message)
 
 def process_broadcast_message(message):
-    user_id = message.chat.id
+    chat_id = message.chat.id
     broadcast_text = message.text
     if not broadcast_text or len(broadcast_text.strip()) == 0:
-        bot.send_message(user_id, MESSAGES["broadcast_empty"])
+        bot.send_message(chat_id, MESSAGES["broadcast_empty"])
         return
     users = get_all_users()
     count = len(users)
     preview_text = MESSAGES["broadcast_preview"].format(message=broadcast_text, count=count)
     keyboard = get_confirm_keyboard()
-    msg = bot.send_message(user_id, preview_text, reply_markup=keyboard, parse_mode='Markdown')
+    msg = bot.send_message(chat_id, preview_text, reply_markup=keyboard, parse_mode='Markdown')
     bot.user_data = getattr(bot, 'user_data', {})
-    bot.user_data[user_id] = {'broadcast_message': broadcast_text, 'message_id': msg.message_id}
+    bot.user_data[chat_id] = {'broadcast_message': broadcast_text, 'message_id': msg.message_id}
 
-# ===== قفل اسپانسر =====
-def show_force_sub_settings(message):
-    user_id = message.chat.id
+def show_force_sub_settings(chat_id):
     channels = get_force_channels()
     channels_text = "\n".join([f"• {ch}" for ch in channels]) if channels else "❌ هیچ کانالی تنظیم نشده است."
     bot.send_message(
-        user_id,
+        chat_id,
         MESSAGES["force_sub_prompt"].format(channels=channels_text),
         parse_mode='Markdown'
     )
 
-# ===== مدیریت ادمین‌ها =====
-def show_admin_list(message):
-    user_id = message.chat.id
-    admins = get_all_admins()
-    if not admins:
-        admins_text = "❌ هیچ ادمینی ثبت نشده است."
-    else:
-        admins_text = "\n".join([
-            f"• `{a['user_id']}` - {a.get('first_name', 'Unknown')} (@{a.get('username', '')}) - نقش: {a['role']}"
-            for a in admins
-        ])
-    text = MESSAGES["admin_list"].format(admins=admins_text)
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    btn_add = InlineKeyboardButton("➕ افزودن ادمین", callback_data="admin_add")
-    btn_back = InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")
-    keyboard.add(btn_add, btn_back)
-    bot.send_message(user_id, text, parse_mode='Markdown', reply_markup=keyboard)
-
-def start_add_admin(message):
-    user_id = message.chat.id
-    msg = bot.send_message(user_id, MESSAGES["admin_add_prompt"])
-    bot.register_next_step_handler(msg, process_add_admin)
-
-def process_add_admin(message):
-    user_id = message.chat.id
-    try:
-        new_admin_id = int(message.text.strip())
-        if new_admin_id == user_id:
-            bot.send_message(user_id, "❌ نمی‌توانید خودتان را دوباره اضافه کنید!")
-            return
-        add_admin(new_admin_id, "moderator")
-        bot.send_message(user_id, MESSAGES["admin_add_success"].format(role="moderator"))
-    except ValueError:
-        bot.send_message(user_id, MESSAGES["admin_invalid_id"])
-
-# ===== تنظیمات =====
-def show_settings(message):
-    user_id = message.chat.id
-    channels = get_force_channels()
-    channels_text = ", ".join(channels) if channels else "❌ هیچ"
-    daily_quota = get_setting("daily_quota", "10")
-    max_file_size = get_setting("max_file_size", "50")
-    is_active = get_setting("is_active", "True")
-    text = MESSAGES["settings_list"].format(
-        channels=channels_text,
-        daily_quota=daily_quota,
-        max_file_size=max_file_size,
-        is_active="🟢 فعال" if is_active == "True" else "🔴 غیرفعال"
-    )
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    btn_quota = InlineKeyboardButton("📊 سقف دانلود", callback_data="setting_quota")
-    btn_size = InlineKeyboardButton("📦 حجم فایل", callback_data="setting_size")
-    btn_active = InlineKeyboardButton("🔄 وضعیت ربات", callback_data="setting_active")
-    btn_back = InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")
-    keyboard.add(btn_quota, btn_size, btn_active, btn_back)
-    bot.send_message(user_id, text, parse_mode='Markdown', reply_markup=keyboard)
-
 # ===================================================
-# 📞 هندلرهای Callback
+# 📞 پردازش Callback
 # ===================================================
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):
@@ -335,7 +180,6 @@ def handle_callback(call):
     
     data = call.data
     
-    # ===== ارسال همگانی =====
     if data == "broadcast_confirm":
         bot.answer_callback_query(call.id, "📨 در حال ارسال...")
         bot.user_data = getattr(bot, 'user_data', {})
@@ -375,7 +219,6 @@ def handle_callback(call):
             del bot.user_data[user_id]
         return
     
-    # ===== عضویت اجباری =====
     elif data == "force_sub_verify":
         is_subscribed, not_subscribed = check_user_subscription(user_id)
         if is_subscribed:
@@ -391,98 +234,98 @@ def handle_callback(call):
             bot.answer_callback_query(call.id, "❌ هنوز در همه کانال‌ها عضو نشدی!", show_alert=True)
             bot.send_message(user_id, MESSAGES["force_sub_required"].format(channels=channels_text))
         return
-    
-    # ===== مدیریت ادمین‌ها =====
-    elif data == "admin_add":
-        bot.answer_callback_query(call.id)
-        try:
-            bot.edit_message_reply_markup(user_id, call.message.message_id, reply_markup=None)
-        except:
-            pass
-        start_add_admin(call.message)
-        return
-    
-    elif data.startswith("admin_remove_"):
-        admin_id = int(data.replace("admin_remove_", ""))
-        if admin_id == user_id:
-            bot.answer_callback_query(call.id, "❌ نمی‌توانید خودتان را حذف کنید!", show_alert=True)
-            return
-        remove_admin(admin_id)
-        bot.answer_callback_query(call.id, "✅ ادمین حذف شد!", show_alert=True)
-        show_admin_list(call.message)
-        return
-    
-    elif data == "admin_admins":
-        bot.answer_callback_query(call.id)
-        try:
-            bot.edit_message_reply_markup(user_id, call.message.message_id, reply_markup=None)
-        except:
-            pass
-        show_admin_list(call.message)
-        return
-    
-    # ===== تنظیمات =====
-    elif data.startswith("setting_"):
-        key = data.replace("setting_", "")
-        if key == "quota":
-            bot.answer_callback_query(call.id)
-            msg = bot.send_message(user_id, "📊 سقف دانلود روزانه را به عدد وارد کنید (0 = نامحدود):")
-            bot.register_next_step_handler(msg, lambda m: update_setting_handler(m, "daily_quota"))
-        elif key == "size":
-            bot.answer_callback_query(call.id)
-            msg = bot.send_message(user_id, "📦 حداکثر حجم فایل را به مگابایت وارد کنید:")
-            bot.register_next_step_handler(msg, lambda m: update_setting_handler(m, "max_file_size"))
-        elif key == "active":
-            current = get_setting("is_active", "True")
-            new_value = "False" if current == "True" else "True"
-            set_setting("is_active", new_value)
-            bot.answer_callback_query(call.id, f"✅ وضعیت تغییر کرد: {'فعال' if new_value == 'True' else 'غیرفعال'}")
-            show_settings(call.message)
-        return
-    
-    # ===== بازگشت =====
-    elif data == "admin_back":
-        bot.answer_callback_query(call.id)
-        try:
-            bot.edit_message_reply_markup(user_id, call.message.message_id, reply_markup=None)
-        except:
-            pass
-        bot.send_message(user_id, MESSAGES["admin_welcome"], reply_markup=get_admin_keyboard())
-        return
-    
-    elif data == "admin_close":
-        bot.answer_callback_query(call.id)
-        try:
-            bot.delete_message(user_id, call.message.message_id)
-        except:
-            pass
-        return
-
-def update_setting_handler(message, key):
-    user_id = message.chat.id
-    try:
-        value = message.text.strip()
-        if key in ["daily_quota", "max_file_size"]:
-            int(value)  # validate
-        set_setting(key, value)
-        bot.send_message(user_id, MESSAGES["settings_updated"])
-        show_settings(message)
-    except ValueError:
-        bot.send_message(user_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
-        msg = bot.send_message(user_id, "دوباره وارد کنید:")
-        bot.register_next_step_handler(msg, lambda m: update_setting_handler(m, key))
 
 # ===================================================
-# 🌐 Webhook
+# 🌐 Webhook - پردازش دستی پیام‌ها
 # ===================================================
 @app.route('/', methods=['POST'])
 def webhook():
     try:
         if request.headers.get('content-type') == 'application/json':
             json_string = request.get_data().decode('utf-8')
+            logging.info(f"📩 Webhook received: {json_string[:200]}...")
+            
             update = telebot.types.Update.de_json(json_string)
-            bot.process_new_updates([update])
+            
+            if update.message:
+                chat_id = update.message.chat.id
+                user_id = update.message.from_user.id
+                text = update.message.text
+                username = update.message.from_user.username
+                first_name = update.message.from_user.first_name
+                last_name = update.message.from_user.last_name
+                
+                logging.info(f"📨 Message from {chat_id}: {text}")
+                
+                # ثبت کاربر در دیتابیس
+                add_user(user_id, username, first_name, last_name)
+                
+                # ===== بررسی عضویت اجباری (به جز ادمین) =====
+                if not is_admin(user_id):
+                    is_subscribed, not_subscribed = check_user_subscription(user_id)
+                    if not is_subscribed:
+                        channels_text = "\n".join([f"• {ch}" for ch in not_subscribed])
+                        keyboard = get_force_sub_keyboard(not_subscribed)
+                        bot.send_message(
+                            chat_id,
+                            MESSAGES["force_sub_required"].format(channels=channels_text),
+                            reply_markup=keyboard
+                        )
+                        return 'OK', 200
+                
+                # ===== پردازش /start =====
+                if text and text.startswith('/start'):
+                    if is_admin(user_id):
+                        keyboard = get_admin_keyboard()
+                    else:
+                        keyboard = get_user_keyboard()
+                    bot.send_message(chat_id, MESSAGES["start"], reply_markup=keyboard)
+                    return 'OK', 200
+                
+                # ===== دکمه‌های ادمین =====
+                if is_admin(user_id):
+                    if text == "📊 آمار ربات":
+                        show_stats(chat_id)
+                        return 'OK', 200
+                    elif text == "📨 ارسال همگانی":
+                        start_broadcast(chat_id, update.message)
+                        return 'OK', 200
+                    elif text == "🔒 قفل اسپانسر":
+                        show_force_sub_settings(chat_id)
+                        return 'OK', 200
+                    elif text == "🔙 بازگشت":
+                        bot.send_message(chat_id, MESSAGES["start"], reply_markup=get_admin_keyboard())
+                        return 'OK', 200
+                
+                # ===== پردازش لینک =====
+                if text and 'instagram.com' in text:
+                    msg = bot.send_message(chat_id, MESSAGES["downloading"])
+                    files, error = download_instagram_post(text)
+                    
+                    if not files:
+                        bot.edit_message_text(f"❌ {error}", chat_id, msg.message_id)
+                        return 'OK', 200
+                    
+                    for f in files:
+                        try:
+                            with open(f, 'rb') as media:
+                                if f.endswith('.mp4'):
+                                    bot.send_video(chat_id, media, caption=MESSAGES["caption"])
+                                else:
+                                    bot.send_photo(chat_id, media, caption=MESSAGES["caption"])
+                                os.remove(f)
+                        except Exception as e:
+                            logging.error(f"خطا در ارسال فایل: {e}")
+                            bot.send_message(chat_id, MESSAGES["send_error"].format(error=str(e)))
+                    
+                    bot.delete_message(chat_id, msg.message_id)
+                else:
+                    if not is_admin(user_id):
+                        bot.send_message(chat_id, MESSAGES["invalid_link"])
+            
             return 'OK', 200
+        else:
+            return 'Unsupported content type', 400
     except Exception as e:
         logging.error(f"Webhook error: {e}")
         return 'Error', 500

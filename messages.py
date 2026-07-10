@@ -82,43 +82,51 @@ _________________
     "settings_updated": "✅ تنظیمات با موفقیت به‌روزرسانی شد.",
     "settings_quota_prompt": "📊 سقف دانلود روزانه را به عدد وارد کنید (0 = نامحدود):",
     "settings_size_prompt": "📦 حداکثر حجم فایل را به مگابایت وارد کنید:",
+    
+    # ===== محدودیت زمانی =====
+    "rate_limit_title": "⏱️ <b>تنظیمات محدودیت زمانی</b>",
+    "rate_limit_status": """⏱️ <b>تنظیمات محدودیت زمانی بین دانلودها</b>
+
+وضعیت: {status}
+زمان انتظار: {seconds} ثانیه
+
+کاربر بعد از هر دانلود باید {seconds} ثانیه صبر کند تا بتواند لینک بعدی را ارسال کند.
+
+برای تغییر، روی دکمه‌های زیر کلیک کنید:""",
+    "rate_limit_enabled": "✅ محدودیت زمانی فعال شد! زمان انتظار: {seconds} ثانیه",
+    "rate_limit_disabled": "❌ محدودیت زمانی غیرفعال شد.",
+    "rate_limit_changed": "⏱️ زمان انتظار به {seconds} ثانیه تغییر کرد.",
+    "rate_limit_wait": "⏳ لطفاً {seconds} ثانیه صبر کنید تا بتوانید لینک بعدی را ارسال کنید.\nزمان باقی‌مانده: {remaining} ثانیه",
 }
 
 # ===================================================
 # ⌨️ دکمه‌های شیشه‌ای (Reply Keyboard - فقط برای ادمین)
 # ===================================================
 def get_admin_keyboard():
-    """دکمه‌های پنل ادمین (دکمه‌های شیشه‌ای اصلی)"""
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    
     btn_stats = KeyboardButton("📊 آمار ربات")
     btn_broadcast = KeyboardButton("📨 ارسال همگانی")
     btn_force_sub = KeyboardButton("🔒 قفل اسپانسر")
     btn_admins = KeyboardButton("📋 مدیریت ادمین‌ها")
     btn_settings = KeyboardButton("⚙️ تنظیمات ربات")
-    
     keyboard.add(btn_stats, btn_broadcast)
     keyboard.add(btn_force_sub, btn_admins)
     keyboard.add(btn_settings)
-    
     return keyboard
 
 def get_user_keyboard():
-    """کاربر عادی هیچ دکمه‌ای نمی‌بینه"""
     return ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
 
 # ===================================================
 # 🔐 دکمه‌های شیشه‌ای (Inline Keyboard)
 # ===================================================
 def get_stats_refresh_keyboard():
-    """دکمه شیشه‌ای برای بروزرسانی آمار"""
     keyboard = InlineKeyboardMarkup()
     btn_refresh = InlineKeyboardButton("🔄 بروزرسانی", callback_data="refresh_stats")
     keyboard.add(btn_refresh)
     return keyboard
 
 def get_force_sub_keyboard(channels):
-    """دکمه‌های تأیید عضویت در کانال"""
     keyboard = InlineKeyboardMarkup(row_width=1)
     for channel in channels:
         btn = InlineKeyboardButton(f"📢 عضویت در {channel}", url=f"https://t.me/{channel.replace('@', '')}")
@@ -128,7 +136,6 @@ def get_force_sub_keyboard(channels):
     return keyboard
 
 def get_confirm_keyboard():
-    """دکمه‌های تأیید یا لغو برای ارسال همگانی"""
     keyboard = InlineKeyboardMarkup(row_width=2)
     btn_confirm = InlineKeyboardButton("✅ تأیید و ارسال", callback_data="broadcast_confirm")
     btn_cancel = InlineKeyboardButton("❌ لغو", callback_data="broadcast_cancel")
@@ -136,9 +143,7 @@ def get_confirm_keyboard():
     return keyboard
 
 def get_admin_list_inline_keyboard(admins):
-    """دکمه‌های مدیریت ادمین‌ها با لیست و گزینه‌های عملیات"""
     keyboard = InlineKeyboardMarkup(row_width=1)
-    
     for admin in admins:
         user_id = admin['user_id']
         name = admin.get('first_name', 'Unknown')
@@ -146,43 +151,49 @@ def get_admin_list_inline_keyboard(admins):
         label = f"👤 {name} (@{username}) - {admin['role']}"
         btn_remove = InlineKeyboardButton(f"❌ {label}", callback_data=f"admin_remove_{user_id}")
         keyboard.add(btn_remove)
-    
     btn_add = InlineKeyboardButton("➕ افزودن ادمین", callback_data="admin_add")
     btn_back = InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")
     keyboard.add(btn_add)
     keyboard.add(btn_back)
-    
     return keyboard
 
 def get_force_sub_inline_keyboard(channels):
-    """دکمه‌های مدیریت قفل اسپانسر"""
     keyboard = InlineKeyboardMarkup(row_width=1)
-    
     for channel in channels:
         btn_remove = InlineKeyboardButton(f"❌ حذف {channel}", callback_data=f"force_sub_remove_{channel}")
         keyboard.add(btn_remove)
-    
     btn_add = InlineKeyboardButton("➕ افزودن کانال", callback_data="force_sub_add")
     btn_back = InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")
     keyboard.add(btn_add)
     keyboard.add(btn_back)
-    
     return keyboard
 
 def get_settings_inline_keyboard():
-    """دکمه‌های تنظیمات ربات"""
     keyboard = InlineKeyboardMarkup(row_width=2)
     btn_quota = InlineKeyboardButton("📊 سقف دانلود", callback_data="setting_quota")
     btn_size = InlineKeyboardButton("📦 حجم فایل", callback_data="setting_size")
     btn_active = InlineKeyboardButton("🔄 وضعیت ربات", callback_data="setting_active")
+    btn_rate_limit = InlineKeyboardButton("⏱️ محدودیت زمانی", callback_data="setting_rate_limit")
     btn_back = InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")
     keyboard.add(btn_quota, btn_size)
-    keyboard.add(btn_active)
+    keyboard.add(btn_active, btn_rate_limit)
+    keyboard.add(btn_back)
+    return keyboard
+
+def get_rate_limit_keyboard():
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    btn_enable = InlineKeyboardButton("✅ فعال", callback_data="rate_limit_enable")
+    btn_disable = InlineKeyboardButton("❌ غیرفعال", callback_data="rate_limit_disable")
+    btn_10s = InlineKeyboardButton("⏱️ ۱۰ ثانیه", callback_data="rate_limit_10")
+    btn_30s = InlineKeyboardButton("⏱️ ۳۰ ثانیه", callback_data="rate_limit_30")
+    btn_60s = InlineKeyboardButton("⏱️ ۶۰ ثانیه", callback_data="rate_limit_60")
+    btn_back = InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")
+    keyboard.add(btn_enable, btn_disable)
+    keyboard.add(btn_10s, btn_30s, btn_60s)
     keyboard.add(btn_back)
     return keyboard
 
 def get_back_keyboard():
-    """دکمه بازگشت ساده"""
     keyboard = InlineKeyboardMarkup()
     btn_back = InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")
     keyboard.add(btn_back)

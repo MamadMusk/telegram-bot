@@ -412,12 +412,12 @@ def handle_callback_query(bot, call, user_data):
         return
     
     elif data.startswith("admin_perm_toggle_"):
-        # ===== ۱. اول جواب query رو بده =====
-        bot.answer_callback_query(call.id, "🔄 در حال تغییر...", show_alert=False)
-        
         parts = data.split("_")
         admin_id = int(parts[3])
         perm_key = parts[4]
+        
+        # ===== ۱. اول جواب query رو بده =====
+        bot.answer_callback_query(call.id, "🔄 در حال تغییر...", show_alert=False)
         
         if not is_owner(user_id) and not has_permission(user_id, "can_manage_admins"):
             bot.answer_callback_query(call.id, MESSAGES["admin_no_permission"], show_alert=True)
@@ -427,32 +427,35 @@ def handle_callback_query(bot, call, user_data):
             bot.answer_callback_query(call.id, MESSAGES["admin_cant_remove_owner"], show_alert=True)
             return
         
-        # ===== ۲. تغییر دسترسی =====
+        # ===== ۲. دریافت دسترسی‌های فعلی =====
         perms = get_admin_permissions(admin_id)
-        new_value = not perms.get(perm_key, False)
+        old_value = perms.get(perm_key, False)
+        new_value = not old_value
         perms[perm_key] = new_value
         update_admin_permissions(admin_id, perms)
         
-        # ===== ۳. ساخت متن جدید =====
+        # ===== ۳. دریافت اطلاعات ادمین =====
         admin_info = get_user(admin_id)
         name = admin_info.get('first_name', 'Unknown') if admin_info else 'Unknown'
         role = get_admin_role(admin_id) or 'viewer'
         
-        text = MESSAGES["admin_permissions_header"].format(
-            name=name,
-            user_id=admin_id,
-            role=role,
-            stats="✅" if perms.get("can_view_stats", False) else "❌",
-            broadcast="✅" if perms.get("can_send_broadcast", False) else "❌",
-            force_sub="✅" if perms.get("can_manage_force_sub", False) else "❌",
-            settings="✅" if perms.get("can_manage_settings", False) else "❌",
-            admins="✅" if perms.get("can_manage_admins", False) else "❌"
-        )
+        # ===== ۴. ساخت متن جدید (کوتاه‌تر) =====
+        text = f"""🔐 <b>دسترسی‌های ادمین</b>
+
+👤 {name} (ID: {admin_id})
+📋 نقش: {role}
+
+• مشاهده آمار: {"✅" if perms.get("can_view_stats", False) else "❌"}
+• ارسال همگانی: {"✅" if perms.get("can_send_broadcast", False) else "❌"}
+• قفل اسپانسر: {"✅" if perms.get("can_manage_force_sub", False) else "❌"}
+• تنظیمات: {"✅" if perms.get("can_manage_settings", False) else "❌"}
+• مدیریت ادمین‌ها: {"✅" if perms.get("can_manage_admins", False) else "❌"}
+"""
         
-        # ===== ۴. کیبورد جدید =====
+        # ===== ۵. ساخت کیبورد جدید =====
         keyboard = get_admin_permissions_keyboard(admin_id, perms, is_owner=False)
         
-        # ===== ۵. ادیت پیام =====
+        # ===== ۶. ادیت پیام =====
         try:
             bot.edit_message_text(
                 text,
@@ -461,7 +464,7 @@ def handle_callback_query(bot, call, user_data):
                 parse_mode='HTML',
                 reply_markup=keyboard
             )
-            # ===== ۶. پیام موفقیت =====
+            # ===== ۷. پیام موفقیت =====
             perm_names = {
                 "can_view_stats": "مشاهده آمار",
                 "can_send_broadcast": "ارسال همگانی",
@@ -471,12 +474,19 @@ def handle_callback_query(bot, call, user_data):
             }
             bot.answer_callback_query(
                 call.id, 
-                f"✅ دسترسی {perm_names.get(perm_key, perm_key)} {'فعال' if new_value else 'غیرفعال'} شد!", 
+                f"✅ {perm_names.get(perm_key, perm_key)} {'فعال' if new_value else 'غیرفعال'} شد!", 
                 show_alert=False
             )
         except Exception as e:
-            logging.error(f"Error in perm toggle: {e}")
-            bot.answer_callback_query(call.id, f"❌ خطا: {str(e)}", show_alert=True)
+            if "message is not modified" in str(e):
+                bot.answer_callback_query(
+                    call.id, 
+                    f"ℹ️ دسترسی قبلاً {'فعال' if old_value else 'غیرفعال'} بود!", 
+                    show_alert=False
+                )
+            else:
+                logging.error(f"Error in perm toggle: {e}")
+                bot.answer_callback_query(call.id, f"❌ خطا: {str(e)}", show_alert=True)
         return
     
     elif data.startswith("admin_remove_"):

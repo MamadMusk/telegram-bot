@@ -6,6 +6,7 @@ import logging
 import time
 import re
 import requests
+from messages import MESSAGES, get_main_keyboard, COMMANDS
 
 TOKEN = "8837695158:AAETrphGJh6wS1bmCXHOFB7-r4YPx0n8KR8"
 bot = telebot.TeleBot(TOKEN)
@@ -17,31 +18,12 @@ if not os.path.exists(DOWNLOAD_DIR):
 
 logging.basicConfig(level=logging.INFO)
 
-# ===================================================
-# 📝 همه پیام‌های ربات - اینجا شخصی‌سازی کن!
-# ===================================================
-MESSAGES = {
-    "start": """موزیک، ویدئو، پست، ریلز، شورت و استوری های مدنظر خود را از تمام پلتفرم های زیر دانلود کنید.
-
-📸 Instagram
-🐦 X (Twitter)
-📱 TikTok
-📌 Pinterest
-📷 Snapchat
-🌐 Facebook
-🎧 SoundCloud
-💬 Threads
-🔗 Reddit
-🎥 Likee
-
-لینک مدنظر خود را جهت دانلود بفرستید.""",
-    "downloading": "⏳ دانلود...",
-    "invalid_link": "❌ لطفاً یه لینک معتبر اینستاگرام بفرست.",
-    "download_failed": "دانلود نشد. پست ممکنه خصوصی یا حذف شده باشه.",
-    "send_error": "خطا در ارسال فایل: {error}",
-    "caption": "🤍Downloaded by @iBBDownloaderBot",
-}
-# ===================================================
+# ===== تنظیم کامندها در منوی ربات =====
+try:
+    bot.set_my_commands(COMMANDS)
+    logging.info("✅ کامندها تنظیم شد")
+except Exception as e:
+    logging.error(f"خطا در تنظیم کامندها: {e}")
 
 def download_image_direct(shortcode):
     try:
@@ -126,10 +108,21 @@ def webhook():
                 text = update.message.text
                 logging.info(f"Message: {text}")
                 
+                # ===== بررسی دستورات =====
                 if text.startswith('/start'):
-                    bot.send_message(chat_id, MESSAGES["start"])
+                    keyboard = get_main_keyboard(is_admin=False)  # آیدی ادمین رو چک کن
+                    bot.send_message(chat_id, MESSAGES["start"], reply_markup=keyboard)
                     return 'OK', 200
                 
+                if text.startswith('/help'):
+                    bot.send_message(chat_id, MESSAGES["help"])
+                    return 'OK', 200
+                
+                if text.startswith('/status'):
+                    bot.send_message(chat_id, MESSAGES["status"])
+                    return 'OK', 200
+                
+                # ===== پردازش لینک =====
                 if 'instagram.com' in text:
                     msg = bot.send_message(chat_id, MESSAGES["downloading"])
                     files, error = download_instagram_post(text)
@@ -149,12 +142,16 @@ def webhook():
                         except Exception as e:
                             logging.error(f"خطا در ارسال: {e}")
                             bot.send_message(chat_id, MESSAGES["send_error"].format(error=str(e)))
-                    
-                    # ===== حذف پیام موفقیت =====
-                    # دیگه پیام "✅ Done!" ارسال نمیشه
-                    # فقط فایل ارسال میشه
                 else:
-                    bot.send_message(chat_id, MESSAGES["invalid_link"])
+                    # ===== دکمه‌های شیشه‌ای =====
+                    if text == MESSAGES["help"]:
+                        bot.send_message(chat_id, "ℹ️ راهنمای ربات:\nلینک اینستاگرام رو بفرست تا دانلود کنم.")
+                    elif text == MESSAGES["status"]:
+                        bot.send_message(chat_id, "📊 ربات فعال است!")
+                    elif text == MESSAGES["admin_panel"]:
+                        bot.send_message(chat_id, "🛠 پنل مدیریت")
+                    else:
+                        bot.send_message(chat_id, MESSAGES["invalid_link"])
             
             return 'OK', 200
     except Exception as e:

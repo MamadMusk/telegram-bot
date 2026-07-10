@@ -11,7 +11,7 @@ from config import TOKEN, ADMIN_IDS, DOWNLOAD_DIR, is_admin, get_db_setting
 from messages import (
     MESSAGES, get_admin_keyboard, get_user_keyboard,
     get_force_sub_keyboard, get_confirm_keyboard,
-    get_admin_inline_keyboard, get_admin_list_inline_keyboard,
+    get_stats_refresh_keyboard, get_admin_list_inline_keyboard,
     get_settings_inline_keyboard, get_force_sub_inline_keyboard,
     COMMANDS
 )
@@ -147,7 +147,7 @@ def show_stats(chat_id, message_id=None):
         downloads=total_downloads
     )
     
-    keyboard = get_admin_inline_keyboard()
+    keyboard = get_stats_refresh_keyboard()
     
     if message_id:
         bot.edit_message_text(text, chat_id, message_id, parse_mode='Markdown', reply_markup=keyboard)
@@ -278,79 +278,11 @@ def handle_callback(call):
         return
     
     data = call.data
-    bot.answer_callback_query(call.id)  # پاسخ اولیه به تلگرام
+    bot.answer_callback_query(call.id)  # پاسخ اولیه
     
-    # ===== منوی اصلی =====
-    if data == "admin_stats":
+    # ===== بروزرسانی آمار =====
+    if data == "stats_refresh":
         show_stats(chat_id, message_id)
-        return
-    elif data == "admin_broadcast":
-        bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
-        bot.send_message(chat_id, MESSAGES["broadcast_prompt"])
-        bot.register_next_step_handler(call.message, process_broadcast_message)
-        return
-    elif data == "admin_force_sub":
-        show_force_sub_settings(chat_id, message_id)
-        return
-    elif data == "admin_admins":
-        show_admin_list(chat_id, message_id)
-        return
-    elif data == "admin_settings":
-        show_settings(chat_id, message_id)
-        return
-    elif data == "admin_back":
-        bot.edit_message_text(MESSAGES["admin_welcome"], chat_id, message_id, reply_markup=get_admin_inline_keyboard())
-        return
-    elif data == "admin_close":
-        bot.delete_message(chat_id, message_id)
-        return
-    
-    # ===== مدیریت ادمین‌ها =====
-    elif data == "admin_add":
-        bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
-        start_add_admin(chat_id)
-        return
-    elif data.startswith("admin_remove_"):
-        admin_id = int(data.replace("admin_remove_", ""))
-        if admin_id == user_id:
-            bot.answer_callback_query(call.id, "❌ نمی‌توانید خودتان را حذف کنید!", show_alert=True)
-            return
-        remove_admin(admin_id)
-        bot.answer_callback_query(call.id, "✅ ادمین حذف شد!", show_alert=True)
-        show_admin_list(chat_id, message_id)
-        return
-    
-    # ===== قفل اسپانسر =====
-    elif data == "force_sub_add":
-        bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
-        start_add_force_channel(chat_id)
-        return
-    elif data.startswith("force_sub_remove_"):
-        channel = data.replace("force_sub_remove_", "")
-        if remove_force_channel(channel):
-            bot.answer_callback_query(call.id, f"✅ کانال {channel} حذف شد!", show_alert=True)
-        else:
-            bot.answer_callback_query(call.id, f"❌ کانال {channel} پیدا نشد!", show_alert=True)
-        show_force_sub_settings(chat_id, message_id)
-        return
-    
-    # ===== تنظیمات =====
-    elif data == "setting_quota":
-        bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
-        msg = bot.send_message(chat_id, MESSAGES["settings_quota_prompt"])
-        bot.register_next_step_handler(msg, lambda m: process_setting_change(m, "daily_quota", MESSAGES["settings_quota_prompt"]))
-        return
-    elif data == "setting_size":
-        bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
-        msg = bot.send_message(chat_id, MESSAGES["settings_size_prompt"])
-        bot.register_next_step_handler(msg, lambda m: process_setting_change(m, "max_file_size", MESSAGES["settings_size_prompt"]))
-        return
-    elif data == "setting_active":
-        current = get_setting("is_active", "True")
-        new_value = "False" if current == "True" else "True"
-        set_setting("is_active", new_value)
-        bot.answer_callback_query(call.id, f"✅ وضعیت تغییر کرد: {'فعال' if new_value == 'True' else 'غیرفعال'}", show_alert=True)
-        show_settings(chat_id, message_id)
         return
     
     # ===== ارسال همگانی =====
@@ -393,6 +325,59 @@ def handle_callback(call):
             del bot.user_data[user_id]
         return
     
+    # ===== قفل اسپانسر =====
+    elif data == "force_sub_add":
+        bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
+        start_add_force_channel(chat_id)
+        return
+    elif data.startswith("force_sub_remove_"):
+        channel = data.replace("force_sub_remove_", "")
+        if remove_force_channel(channel):
+            bot.answer_callback_query(call.id, f"✅ کانال {channel} حذف شد!", show_alert=True)
+        else:
+            bot.answer_callback_query(call.id, f"❌ کانال {channel} پیدا نشد!", show_alert=True)
+        show_force_sub_settings(chat_id, message_id)
+        return
+    
+    # ===== مدیریت ادمین‌ها =====
+    elif data == "admin_add":
+        bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
+        start_add_admin(chat_id)
+        return
+    elif data.startswith("admin_remove_"):
+        admin_id = int(data.replace("admin_remove_", ""))
+        if admin_id == user_id:
+            bot.answer_callback_query(call.id, "❌ نمی‌توانید خودتان را حذف کنید!", show_alert=True)
+            return
+        remove_admin(admin_id)
+        bot.answer_callback_query(call.id, "✅ ادمین حذف شد!", show_alert=True)
+        show_admin_list(chat_id, message_id)
+        return
+    
+    # ===== تنظیمات =====
+    elif data == "setting_quota":
+        bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
+        msg = bot.send_message(chat_id, MESSAGES["settings_quota_prompt"])
+        bot.register_next_step_handler(msg, lambda m: process_setting_change(m, "daily_quota", MESSAGES["settings_quota_prompt"]))
+        return
+    elif data == "setting_size":
+        bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
+        msg = bot.send_message(chat_id, MESSAGES["settings_size_prompt"])
+        bot.register_next_step_handler(msg, lambda m: process_setting_change(m, "max_file_size", MESSAGES["settings_size_prompt"]))
+        return
+    elif data == "setting_active":
+        current = get_setting("is_active", "True")
+        new_value = "False" if current == "True" else "True"
+        set_setting("is_active", new_value)
+        bot.answer_callback_query(call.id, f"✅ وضعیت تغییر کرد: {'فعال' if new_value == 'True' else 'غیرفعال'}", show_alert=True)
+        show_settings(chat_id, message_id)
+        return
+    
+    # ===== بازگشت به منو =====
+    elif data == "admin_back":
+        bot.edit_message_text("📋 منوی مدیریت:", chat_id, message_id, reply_markup=get_admin_inline_keyboard())
+        return
+
     # ===== تأیید عضویت =====
     elif data == "force_sub_verify":
         is_subscribed, not_subscribed = check_user_subscription(user_id)
@@ -411,7 +396,7 @@ def handle_callback(call):
         return
 
 # ===================================================
-# 🌐 Webhook - پردازش دستی پیام‌ها
+# 🌐 Webhook
 # ===================================================
 @app.route('/', methods=['POST'])
 def webhook():
@@ -432,10 +417,10 @@ def webhook():
                 
                 logging.info(f"📨 Message from {chat_id}: {text}")
                 
-                # ثبت کاربر در دیتابیس
+                # ثبت کاربر
                 add_user(user_id, username, first_name, last_name)
                 
-                # ===== بررسی عضویت اجباری (به جز ادمین) =====
+                # بررسی عضویت اجباری
                 if not is_admin(user_id):
                     is_subscribed, not_subscribed = check_user_subscription(user_id)
                     if not is_subscribed:
@@ -453,33 +438,30 @@ def webhook():
                     if is_admin(user_id):
                         keyboard = get_admin_keyboard()
                         bot.send_message(chat_id, MESSAGES["start"], reply_markup=keyboard)
-                        # نمایش پنل مدیریت با دکمه‌های شیشه‌ای
-                        bot.send_message(chat_id, MESSAGES["admin_welcome"], reply_markup=get_admin_inline_keyboard())
                     else:
                         keyboard = get_user_keyboard()
                         bot.send_message(chat_id, MESSAGES["start"], reply_markup=keyboard)
                     return 'OK', 200
                 
-                # ===== دکمه‌های شیشه‌ای (Reply Keyboard) =====
+                # ===== دکمه‌های شیشه‌ای ادمین =====
                 if is_admin(user_id):
-                    if text == "📊 آمار ربات":
+                    if text == MESSAGES["admin_stats"]:
                         show_stats(chat_id)
                         return 'OK', 200
-                    elif text == "📨 ارسال همگانی":
+                    elif text == MESSAGES["admin_broadcast"]:
                         start_broadcast(chat_id, update.message)
                         return 'OK', 200
-                    elif text == "🔒 قفل اسپانسر":
+                    elif text == MESSAGES["admin_force_sub"]:
                         show_force_sub_settings(chat_id)
                         return 'OK', 200
-                    elif text == "📋 مدیریت ادمین‌ها":
+                    elif text == MESSAGES["admin_admins"]:
                         show_admin_list(chat_id)
                         return 'OK', 200
-                    elif text == "⚙️ تنظیمات ربات":
+                    elif text == MESSAGES["admin_settings"]:
                         show_settings(chat_id)
                         return 'OK', 200
-                    elif text == "🔙 بازگشت":
+                    elif text == MESSAGES["admin_back"]:
                         bot.send_message(chat_id, MESSAGES["start"], reply_markup=get_admin_keyboard())
-                        bot.send_message(chat_id, MESSAGES["admin_welcome"], reply_markup=get_admin_inline_keyboard())
                         return 'OK', 200
                 
                 # ===== پردازش لینک =====

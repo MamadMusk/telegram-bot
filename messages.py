@@ -34,7 +34,8 @@ MESSAGES = {
     "broadcast_prompt": "📝 پیام مورد نظر برای ارسال به تمام کاربران را بنویسید:",
     "broadcast_preview": "📨 <b>پیش‌نمایش پیام همگانی</b>\n\n{message}\n\n👥 تعداد گیرندگان: {count} نفر\n\nآیا از ارسال مطمئن هستید؟",
     "broadcast_cancelled": "❌ ارسال همگانی لغو شد.",
-    "broadcast_success": "✅ پیام همگانی با موفقیت به {count} نفر ارسال شد.",
+    "broadcast_success": "✅ ارسال همگانی با موفقیت به پایان رسید!\n\n📊 <b>گزارش ارسال:</b>\n• کل کاربران: {total}\n• ارسال موفق: {success}\n• خطا: {failed}",
+    "broadcast_progress": "📨 <b>در حال ارسال همگانی...</b>\n\n• ارسال شده: {sent} از {total} ({percent}%)\n• باقی‌مانده: {remaining}\n• خطا: {failed}\n\nبرای بروزرسانی، روی دکمه کلیک کنید.",
     "broadcast_failed": "❌ خطا در ارسال همگانی: {error}",
     "broadcast_empty": "❌ پیام نمی‌تواند خالی باشد.",
     
@@ -58,12 +59,14 @@ MESSAGES = {
     "force_sub_verified": "✅ عضویت شما تأیید شد! حالا می‌توانید از ربات استفاده کنید.",
     
     # ===== مدیریت ادمین‌ها =====
+    "admin_management": "📋 مدیریت ادمین‌ها",
     "admin_list": """📋 <b>لیست ادمین‌ها</b>
 
 {admins}
 _________________
 🔹 <b>نقش‌ها:</b>
-• super - دسترسی کامل
+• owner - مالک ربات (دسترسی کامل)
+• super - دسترسی کامل به جز حذف owner
 • moderator - مدیریت کاربران
 • viewer - فقط مشاهده""",
     "admin_add_prompt": "👤 آیدی عددی کاربر جدید را برای افزودن به عنوان ادمین وارد کنید:",
@@ -71,6 +74,26 @@ _________________
     "admin_remove_success": "❌ کاربر از لیست ادمین‌ها حذف شد.",
     "admin_invalid_id": "❌ آیدی وارد شده معتبر نیست.",
     "admin_cant_remove_self": "❌ نمی‌توانید خودتان را حذف کنید!",
+    "admin_cant_remove_owner": "❌ نمی‌توانید مالک ربات را حذف یا ویرایش کنید!",
+    "admin_no_permission": "⛔ شما دسترسی لازم برای این کار را ندارید.",
+    
+    # ===== مدیریت دسترسی ادمین =====
+    "admin_permissions_title": "🔐 مدیریت دسترسی‌های ادمین",
+    "admin_permissions_header": """🔐 <b>مدیریت دسترسی‌های ادمین</b>
+
+👤 <b>ادمین:</b> {name} (ID: {user_id})
+📋 <b>نقش:</b> {role}
+
+<b>دسترسی‌های فعلی:</b>
+• مشاهده آمار: {stats}
+• ارسال همگانی: {broadcast}
+• مدیریت قفل اسپانسر: {force_sub}
+• مدیریت تنظیمات: {settings}
+• مدیریت ادمین‌ها: {admins}
+
+برای تغییر هر دسترسی، روی دکمه مربوطه کلیک کنید.
+""",
+    "permission_toggle_success": "✅ دسترسی {perm} برای ادمین {user_id} تغییر کرد.",
     
     # ===== تنظیمات =====
     "settings_list": """⚙️ <b>تنظیمات ربات</b>
@@ -78,7 +101,8 @@ _________________
 📌 <b>کانال‌های اجباری:</b> {channels}
 📌 <b>سقف دانلود روزانه:</b> {daily_quota} 
 📌 <b>حداکثر حجم فایل:</b> {max_file_size} MB
-📌 <b>وضعیت ربات:</b> {is_active}""",
+📌 <b>وضعیت ربات:</b> {is_active}
+📌 <b>محدودیت زمانی:</b> {rate_limit_status} ({rate_limit_seconds} ثانیه)""",
     "settings_updated": "✅ تنظیمات با موفقیت به‌روزرسانی شد.",
     "settings_quota_prompt": "📊 سقف دانلود روزانه را به عدد وارد کنید (0 = نامحدود):",
     "settings_size_prompt": "📦 حداکثر حجم فایل را به مگابایت وارد کنید:",
@@ -142,19 +166,52 @@ def get_confirm_keyboard():
     keyboard.add(btn_confirm, btn_cancel)
     return keyboard
 
-def get_admin_list_inline_keyboard(admins):
+def get_broadcast_progress_keyboard():
+    keyboard = InlineKeyboardMarkup()
+    btn_refresh = InlineKeyboardButton("🔄 بروزرسانی وضعیت", callback_data="broadcast_refresh")
+    btn_cancel = InlineKeyboardButton("❌ توقف ارسال", callback_data="broadcast_cancel_force")
+    keyboard.add(btn_refresh, btn_cancel)
+    return keyboard
+
+def get_admin_list_inline_keyboard(admins, current_user_id):
+    """لیست ادمین‌ها به صورت دکمه‌های شیشه‌ای"""
     keyboard = InlineKeyboardMarkup(row_width=1)
     for admin in admins:
-        user_id = admin['user_id']
+        uid = admin['user_id']
         name = admin.get('first_name', 'Unknown')
         username = admin.get('username', '')
-        label = f"👤 {name} (@{username}) - {admin['role']}"
-        btn_remove = InlineKeyboardButton(f"❌ {label}", callback_data=f"admin_remove_{user_id}")
-        keyboard.add(btn_remove)
-    btn_add = InlineKeyboardButton("➕ افزودن ادمین", callback_data="admin_add")
-    btn_back = InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")
-    keyboard.add(btn_add)
-    keyboard.add(btn_back)
+        role = admin.get('role', 'viewer')
+        # نمایش با آیکون نقش
+        role_icon = "👑" if role == "owner" else "⭐" if role == "super" else "🔹"
+        label = f"{role_icon} {name} (@{username})"
+        btn = InlineKeyboardButton(label, callback_data=f"admin_view_{uid}")
+        keyboard.add(btn)
+    # دکمه افزودن ادمین (فقط برای کسانی که اجازه دارند)
+    keyboard.add(InlineKeyboardButton("➕ افزودن ادمین", callback_data="admin_add"))
+    keyboard.add(InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back"))
+    return keyboard
+
+def get_admin_permissions_keyboard(admin_user_id, permissions, is_owner=False):
+    """دکمه‌های مدیریت دسترسی‌های یک ادمین خاص"""
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    # نمایش وضعیت هر دسترسی با دکمه تغییر
+    for perm_key, perm_label in [
+        ("can_view_stats", "👁️ مشاهده آمار"),
+        ("can_send_broadcast", "📨 ارسال همگانی"),
+        ("can_manage_force_sub", "🔒 قفل اسپانسر"),
+        ("can_manage_settings", "⚙️ تنظیمات"),
+        ("can_manage_admins", "👥 مدیریت ادمین‌ها")
+    ]:
+        status = "✅" if permissions.get(perm_key, False) else "❌"
+        btn = InlineKeyboardButton(
+            f"{status} {perm_label}",
+            callback_data=f"admin_perm_toggle_{admin_user_id}_{perm_key}"
+        )
+        keyboard.add(btn)
+    # دکمه حذف ادمین (فقط اگر owner نباشد)
+    if not is_owner:
+        keyboard.add(InlineKeyboardButton("❌ حذف ادمین", callback_data=f"admin_remove_{admin_user_id}"))
+    keyboard.add(InlineKeyboardButton("🔙 بازگشت به لیست", callback_data="admin_list_back"))
     return keyboard
 
 def get_force_sub_inline_keyboard(channels):
@@ -187,9 +244,10 @@ def get_rate_limit_keyboard():
     btn_10s = InlineKeyboardButton("⏱️ ۱۰ ثانیه", callback_data="rate_limit_10")
     btn_30s = InlineKeyboardButton("⏱️ ۳۰ ثانیه", callback_data="rate_limit_30")
     btn_60s = InlineKeyboardButton("⏱️ ۶۰ ثانیه", callback_data="rate_limit_60")
+    btn_120s = InlineKeyboardButton("⏱️ ۱۲۰ ثانیه", callback_data="rate_limit_120")
     btn_back = InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")
     keyboard.add(btn_enable, btn_disable)
-    keyboard.add(btn_10s, btn_30s, btn_60s)
+    keyboard.add(btn_10s, btn_30s, btn_60s, btn_120s)
     keyboard.add(btn_back)
     return keyboard
 

@@ -25,7 +25,7 @@ from database import (
     get_rate_limit_seconds, set_rate_limit_seconds,
     get_admin_permissions, update_admin_permissions,
     get_user,
-    get_admin_role  # <--- این رو اضافه کن
+    get_admin_role
 )
 
 OWNER_ID = 1085150385
@@ -177,7 +177,13 @@ def show_admin_list(bot, chat_id, message_id=None, current_user_id=None):
         keyboard = get_admin_list_inline_keyboard(admins, current_user_id)
         
         if message_id:
-            bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
+            try:
+                bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
+            except Exception as e:
+                if "message is not modified" in str(e):
+                    bot.answer_callback_query(message_id, "📋 لیست به‌روز است!", show_alert=False)
+                else:
+                    raise e
         else:
             bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=keyboard)
     except Exception as e:
@@ -193,11 +199,13 @@ def show_admin_permissions(bot, chat_id, admin_id, message_id=None, current_user
             bot.send_message(chat_id, MESSAGES["admin_cant_remove_owner"])
             return
         
+        # دریافت مجوزها و اطلاعات
         perms = get_admin_permissions(admin_id)
         admin_info = get_user(admin_id)
         name = admin_info.get('first_name', 'Unknown') if admin_info else 'Unknown'
-        role = get_admin_role(admin_id) or 'viewer'  # <--- اینجا اصلاح شد
+        role = get_admin_role(admin_id) or 'viewer'
         
+        # ساخت متن جدید
         text = MESSAGES["admin_permissions_header"].format(
             name=name,
             user_id=admin_id,
@@ -211,7 +219,23 @@ def show_admin_permissions(bot, chat_id, admin_id, message_id=None, current_user
         keyboard = get_admin_permissions_keyboard(admin_id, perms, is_owner=False)
         
         if message_id:
-            bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
+            try:
+                # تلاش برای ویرایش پیام
+                bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
+            except Exception as e:
+                error_msg = str(e)
+                if "message is not modified" in error_msg:
+                    # اگر پیام تغییری نکرده، فقط نوتیف بده
+                    bot.answer_callback_query(message_id, "ℹ️ دسترسی‌ها تغییر نکرده‌اند.", show_alert=False)
+                else:
+                    # اگر خطای دیگه‌ای بود، لاگ کن
+                    logging.error(f"Error editing admin permissions: {e}")
+                    # در صورت خطا، پیام جدید بفرست و پیام قبلی رو حذف کن
+                    try:
+                        bot.delete_message(chat_id, message_id)
+                    except:
+                        pass
+                    bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=keyboard)
         else:
             bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=keyboard)
     except Exception as e:
@@ -224,7 +248,13 @@ def show_force_sub_settings(bot, chat_id, message_id=None):
         text = MESSAGES["force_sub_prompt"].format(channels=channels_text)
         keyboard = get_force_sub_inline_keyboard(channels)
         if message_id:
-            bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
+            try:
+                bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
+            except Exception as e:
+                if "message is not modified" in str(e):
+                    bot.answer_callback_query(message_id, "ℹ️ تنظیمات تغییری نکرده.", show_alert=False)
+                else:
+                    raise e
         else:
             bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=keyboard)
     except Exception as e:
@@ -250,7 +280,13 @@ def show_settings(bot, chat_id, message_id=None):
         )
         keyboard = get_settings_inline_keyboard()
         if message_id:
-            bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
+            try:
+                bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
+            except Exception as e:
+                if "message is not modified" in str(e):
+                    bot.answer_callback_query(message_id, "ℹ️ تنظیمات تغییری نکرده.", show_alert=False)
+                else:
+                    raise e
         else:
             bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=keyboard)
     except Exception as e:
@@ -266,7 +302,13 @@ def show_rate_limit_settings(bot, chat_id, message_id=None):
         )
         keyboard = get_rate_limit_keyboard()
         if message_id:
-            bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
+            try:
+                bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
+            except Exception as e:
+                if "message is not modified" in str(e):
+                    bot.answer_callback_query(message_id, "ℹ️ تنظیمات تغییری نکرده.", show_alert=False)
+                else:
+                    raise e
         else:
             bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=keyboard)
     except Exception as e:
@@ -311,7 +353,6 @@ def start_broadcast(bot, chat_id, broadcast_text):
             if not job['running']:
                 break
             try:
-                # ===== اصلاح: استفاده از 'id' به جای 'user_id' =====
                 bot.send_message(user['id'], broadcast_text)
                 job['sent'] += 1
                 logging.info(f"✅ Broadcast sent to {user['id']}")
@@ -425,6 +466,7 @@ def handle_callback_query(bot, call, user_data):
             bot.answer_callback_query(call.id, MESSAGES["admin_cant_remove_owner"], show_alert=True)
             return
         
+        # تغییر دسترسی
         perms = get_admin_permissions(admin_id)
         perms[perm_key] = not perms.get(perm_key, False)
         update_admin_permissions(admin_id, perms)
@@ -437,6 +479,7 @@ def handle_callback_query(bot, call, user_data):
             "can_manage_admins": "مدیریت ادمین‌ها"
         }
         bot.answer_callback_query(call.id, f"✅ دسترسی {perm_names.get(perm_key, perm_key)} تغییر کرد!", show_alert=True)
+        # به‌روزرسانی پنل
         show_admin_permissions(bot, chat_id, admin_id, message_id, user_id)
         return
     

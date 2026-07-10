@@ -17,6 +17,9 @@ if not os.path.exists(DOWNLOAD_DIR):
 
 logging.basicConfig(level=logging.INFO)
 
+# ===== کپشن ثابت =====
+FIXED_CAPTION = "🤍Downloaded by @iBBDownloaderBot"
+
 def download_image_direct(shortcode):
     try:
         embed_url = f"https://www.instagram.com/p/{shortcode}/embed/"
@@ -59,7 +62,6 @@ def download_instagram_post(url):
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 files = []
-                caption = ""
                 
                 if info:
                     if 'entries' in info and info['entries']:
@@ -68,17 +70,14 @@ def download_instagram_post(url):
                                 fname = ydl.prepare_filename(entry)
                                 if os.path.exists(fname):
                                     files.append(fname)
-                        if info['entries'] and info['entries'][0]:
-                            caption = info['entries'][0].get('description', '')
                     else:
                         fname = ydl.prepare_filename(info)
                         if os.path.exists(fname):
                             files.append(fname)
-                        caption = info.get('description', '')
                 
                 if files:
                     logging.info(f"✅ yt-dlp: {len(files)} فایل دانلود شد")
-                    return files, caption
+                    return files, None
         except Exception as e:
             logging.warning(f"yt-dlp failed: {e}")
 
@@ -86,7 +85,7 @@ def download_instagram_post(url):
         logging.info("Trying direct image download...")
         img_file = download_image_direct(shortcode)
         if img_file:
-            return [img_file], ""
+            return [img_file], None
 
         return None, "دانلود نشد. پست ممکنه خصوصی یا حذف شده باشه."
 
@@ -112,23 +111,20 @@ def webhook():
                 
                 if 'instagram.com' in text:
                     msg = bot.send_message(chat_id, "⏳ Downloading...")
-                    files, caption = download_instagram_post(text)
+                    files, _ = download_instagram_post(text)
                     
                     if not files:
-                        bot.edit_message_text(f"❌ {caption}", chat_id, msg.message_id)
+                        bot.edit_message_text(f"❌ {_}", chat_id, msg.message_id)
                         return 'OK', 200
                     
-                    for i, f in enumerate(files):
+                    for f in files:
                         try:
                             with open(f, 'rb') as media:
-                                # ===== کپشن رو کوتاه کن =====
-                                if caption and len(caption) > 1000:
-                                    caption = caption[:1000] + "..."
-                                
+                                # ===== همه فایل‌ها با کپشن ثابت =====
                                 if f.endswith('.mp4'):
-                                    bot.send_video(chat_id, media, caption=caption if i == 0 else None)
+                                    bot.send_video(chat_id, media, caption=FIXED_CAPTION)
                                 else:
-                                    bot.send_photo(chat_id, media, caption=caption if i == 0 else None)
+                                    bot.send_photo(chat_id, media, caption=FIXED_CAPTION)
                             os.remove(f)
                         except Exception as e:
                             logging.error(f"خطا در ارسال: {e}")

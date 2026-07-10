@@ -4,6 +4,7 @@ import re
 import os
 import requests
 import yt_dlp
+import threading
 
 from config import is_admin, DOWNLOAD_DIR
 from messages import (
@@ -23,8 +24,13 @@ from database import (
     get_rate_limit_enabled, set_rate_limit_enabled,
     get_rate_limit_seconds, set_rate_limit_seconds,
     get_admin_permissions, update_admin_permissions,
-    is_admin as db_is_admin
+    get_user
 )
+
+OWNER_ID = 1085150385
+
+# متغیر برای نگهداری وضعیت ارسال همگانی در حال اجرا
+broadcast_jobs = {}
 
 # ===================================================
 # 🔒 توابع بررسی عضویت و مجوزها
@@ -53,7 +59,7 @@ def has_permission(user_id, permission):
 
 def is_owner(user_id):
     """بررسی مالک ربات بودن"""
-    return user_id in [1085150385]  # یا از ADMIN_IDS
+    return user_id == OWNER_ID
 
 # ===================================================
 # 📥 توابع دانلود
@@ -153,14 +159,14 @@ def show_stats(bot, chat_id, message_id=None):
     except Exception as e:
         logging.error(f"Error in show_stats: {e}")
 
-def show_admin_list(bot, chat_id, message_id=None, user_id=None):
+def show_admin_list(bot, chat_id, message_id=None, current_user_id=None):
+    """نمایش لیست ادمین‌ها به صورت دکمه‌های شیشه‌ای"""
     try:
-        admins = get_all_admins()
-        # اگر کاربر جاری owner نیست و مجوز مدیریت ادمین‌ها رو نداره، فقط لیست رو نمایش بده
-        if not is_owner(user_id) and not has_permission(user_id, "can_manage_admins"):
+        if not is_owner(current_user_id) and not has_permission(current_user_id, "can_manage_admins"):
             bot.send_message(chat_id, MESSAGES["admin_no_permission"])
             return
-        # ساخت متن لیست
+        
+        admins = get_all_admins()
         if not admins:
             admins_text = "❌ هیچ ادمینی ثبت نشده است."
         else:
@@ -168,8 +174,10 @@ def show_admin_list(bot, chat_id, message_id=None, user_id=None):
                 f"• <code>{a['user_id']}</code> - {a.get('first_name', 'Unknown')} (@{a.get('username', '')}) - نقش: {a['role']}"
                 for a in admins
             ])
+        
         text = MESSAGES["admin_list"].format(admins=admins_text)
-        keyboard = get_admin_list_inline_keyboard(admins, user_id)
+        keyboard = get_admin_list_inline_keyboard(admins, current_user_id)
+        
         if message_id:
             bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
         else:
@@ -177,23 +185,22 @@ def show_admin_list(bot, chat_id, message_id=None, user_id=None):
     except Exception as e:
         logging.error(f"Error in show_admin_list: {e}")
 
-def show_admin_permissions(bot, chat_id, admin_id, message_id=None):
+def show_admin_permissions(bot, chat_id, admin_id, message_id=None, current_user_id=None):
     """نمایش پنل مدیریت دسترسی‌های یک ادمین خاص"""
     try:
-        # بررسی اینکه کاربر جاری مجوز مدیریت ادمین‌ها رو داره
-        if not is_owner(user_id) and not has_permission(user_id, "can_manage_admins"):
+        if not is_owner(current_user_id) and not has_permission(current_user_id, "can_manage_admins"):
             bot.send_message(chat_id, MESSAGES["admin_no_permission"])
             return
-        # اگر ادمین مورد نظر owner است، اجازه ویرایش نده
-        if admin_id in [1085150385]:
+        
+        if admin_id == OWNER_ID:
             bot.send_message(chat_id, MESSAGES["admin_cant_remove_owner"])
             return
+        
         perms = get_admin_permissions(admin_id)
-        # اطلاعات ادمین
         admin_info = get_user(admin_id)
         name = admin_info.get('first_name', 'Unknown') if admin_info else 'Unknown'
-        role = get_admin_role(admin_id)
-        # ساخت متن
+        role = get_admin_role(admin_id) or 'viewer'
+        
         text = MESSAGES["admin_permissions_header"].format(
             name=name,
             user_id=admin_id,
@@ -205,6 +212,7 @@ def show_admin_permissions(bot, chat_id, admin_id, message_id=None):
             admins="✅" if perms.get("can_manage_admins", False) else "❌"
         )
         keyboard = get_admin_permissions_keyboard(admin_id, perms, is_owner=False)
+        
         if message_id:
             bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
         else:
@@ -267,20 +275,27 @@ def show_rate_limit_settings(bot, chat_id, message_id=None):
     except Exception as e:
         logging.error(f"Error in show_rate_limit_settings: {e}")
 
-# متغیر برای نگهداری وضعیت ارسال همگانی در حال اجرا
-broadcast_jobs = {}  # chat_id: {'total': int, 'sent': int, 'failed': int, 'users': list, 'message': str, 'message_id': int}
-
+# ===================================================
+# 📨 ارسال همگانی با نمایش پیشرفت
+# ===================================================
 def start_broadcast(bot, chat_id, broadcast_text):
+    """شروع ارسال همگانی با نمایش پیشرفت"""
     users = get_all_users()
     total = len(users)
     if total == 0:
         bot.send_message(chat_id, "❌ هیچ کاربری برای ارسال وجود ندارد.")
         return
-    # ارسال پیام پیشرفت اولیه
-    progress_text = MESSAGES["broadcast_progress"].format(sent=0, total=total, percent=0, remaining=total, failed=0)
+    
+    progress_text = MESSAGES["broadcast_progress"].format(
+        sent=0, 
+        total=total, 
+        percent=0, 
+        remaining=total, 
+        failed=0
+    )
     keyboard = get_broadcast_progress_keyboard()
     msg = bot.send_message(chat_id, progress_text, parse_mode='HTML', reply_markup=keyboard)
-    # ذخیره وضعیت
+    
     broadcast_jobs[chat_id] = {
         'total': total,
         'sent': 0,
@@ -290,48 +305,70 @@ def start_broadcast(bot, chat_id, broadcast_text):
         'message_id': msg.message_id,
         'running': True
     }
-    # شروع ارسال در پس‌زمینه (با استفاده از threading)
-    import threading
+    
     def send_async():
         job = broadcast_jobs.get(chat_id)
         if not job:
             return
+        
         for user in job['users']:
             if not job['running']:
                 break
             try:
                 bot.send_message(user['user_id'], broadcast_text)
                 job['sent'] += 1
+                logging.info(f"✅ Broadcast sent to {user['user_id']}")
             except Exception as e:
                 job['failed'] += 1
-                logging.error(f"Broadcast failed to {user['user_id']}: {e}")
-            # بروزرسانی پیام هر ۱۰ نفر
-            if (job['sent'] + job['failed']) % 10 == 0 or (job['sent'] + job['failed']) == job['total']:
+                logging.error(f"❌ Broadcast failed to {user['user_id']}: {e}")
+            
+            if (job['sent'] + job['failed']) % 5 == 0 or (job['sent'] + job['failed']) == job['total']:
                 update_broadcast_progress(bot, chat_id)
-            time.sleep(0.05)  # جلوگیری از محدودیت
-        # پایان کار
+            
+            time.sleep(0.05)
+        
         job['running'] = False
         update_broadcast_progress(bot, chat_id, final=True)
+    
     threading.Thread(target=send_async, daemon=True).start()
 
 def update_broadcast_progress(bot, chat_id, final=False):
+    """به‌روزرسانی پیام پیشرفت ارسال همگانی"""
     job = broadcast_jobs.get(chat_id)
     if not job:
         return
+    
     total = job['total']
     sent = job['sent']
     failed = job['failed']
     remaining = total - sent - failed
     percent = int((sent / total) * 100) if total > 0 else 0
+    
     if final:
-        # گزارش نهایی
-        text = MESSAGES["broadcast_success"].format(total=total, success=sent, failed=failed)
+        text = MESSAGES["broadcast_success"].format(
+            total=total, 
+            success=sent, 
+            failed=failed
+        )
         keyboard = None
     else:
-        text = MESSAGES["broadcast_progress"].format(sent=sent, total=total, percent=percent, remaining=remaining, failed=failed)
+        text = MESSAGES["broadcast_progress"].format(
+            sent=sent, 
+            total=total, 
+            percent=percent, 
+            remaining=remaining, 
+            failed=failed
+        )
         keyboard = get_broadcast_progress_keyboard()
+    
     try:
-        bot.edit_message_text(text, chat_id, job['message_id'], parse_mode='HTML', reply_markup=keyboard)
+        bot.edit_message_text(
+            text, 
+            chat_id, 
+            job['message_id'], 
+            parse_mode='HTML', 
+            reply_markup=keyboard
+        )
     except Exception as e:
         logging.error(f"Error updating broadcast progress: {e}")
 
@@ -352,7 +389,7 @@ def handle_callback_query(bot, call, user_data):
     
     # ===== بروزرسانی آمار =====
     if data == "refresh_stats":
-        if not has_permission(user_id, "can_view_stats") and not is_owner(user_id):
+        if not is_owner(user_id) and not has_permission(user_id, "can_view_stats"):
             bot.answer_callback_query(call.id, MESSAGES["admin_no_permission"], show_alert=True)
             return
         bot.answer_callback_query(call.id, "🔄 در حال بروزرسانی...", show_alert=False)
@@ -371,33 +408,31 @@ def handle_callback_query(bot, call, user_data):
         return
     
     elif data.startswith("admin_view_"):
-        # نمایش پنل دسترسی ادمین
         admin_id = int(data.replace("admin_view_", ""))
         if not is_owner(user_id) and not has_permission(user_id, "can_manage_admins"):
             bot.answer_callback_query(call.id, MESSAGES["admin_no_permission"], show_alert=True)
             return
         bot.answer_callback_query(call.id, "🔐 در حال بارگذاری...", show_alert=False)
-        show_admin_permissions(bot, chat_id, admin_id, message_id)
+        show_admin_permissions(bot, chat_id, admin_id, message_id, user_id)
         return
     
     elif data.startswith("admin_perm_toggle_"):
-        # تغییر دسترسی خاص
         parts = data.split("_")
-        # format: admin_perm_toggle_{admin_id}_{perm_key}
         admin_id = int(parts[3])
         perm_key = parts[4]
+        
         if not is_owner(user_id) and not has_permission(user_id, "can_manage_admins"):
             bot.answer_callback_query(call.id, MESSAGES["admin_no_permission"], show_alert=True)
             return
-        if admin_id in [1085150385]:
+        
+        if admin_id == OWNER_ID:
             bot.answer_callback_query(call.id, MESSAGES["admin_cant_remove_owner"], show_alert=True)
             return
-        # دریافت دسترسی‌های فعلی
+        
         perms = get_admin_permissions(admin_id)
-        # تغییر وضعیت
         perms[perm_key] = not perms.get(perm_key, False)
         update_admin_permissions(admin_id, perms)
-        # نمایش پیام موفقیت
+        
         perm_names = {
             "can_view_stats": "مشاهده آمار",
             "can_send_broadcast": "ارسال همگانی",
@@ -406,8 +441,7 @@ def handle_callback_query(bot, call, user_data):
             "can_manage_admins": "مدیریت ادمین‌ها"
         }
         bot.answer_callback_query(call.id, f"✅ دسترسی {perm_names.get(perm_key, perm_key)} تغییر کرد!", show_alert=True)
-        # به‌روزرسانی پنل
-        show_admin_permissions(bot, chat_id, admin_id, message_id)
+        show_admin_permissions(bot, chat_id, admin_id, message_id, user_id)
         return
     
     elif data.startswith("admin_remove_"):
@@ -418,7 +452,7 @@ def handle_callback_query(bot, call, user_data):
         if admin_id == user_id:
             bot.answer_callback_query(call.id, MESSAGES["admin_cant_remove_self"], show_alert=True)
             return
-        if admin_id in [1085150385]:
+        if admin_id == OWNER_ID:
             bot.answer_callback_query(call.id, MESSAGES["admin_cant_remove_owner"], show_alert=True)
             return
         remove_admin(admin_id)
@@ -532,19 +566,21 @@ def handle_callback_query(bot, call, user_data):
         if not is_owner(user_id) and not has_permission(user_id, "can_send_broadcast"):
             bot.answer_callback_query(call.id, MESSAGES["admin_no_permission"], show_alert=True)
             return
-        # دریافت پیام ذخیره شده
+        
         data_obj = user_data.get(user_id, {})
         broadcast_text = data_obj.get('broadcast_message', '')
         if not broadcast_text:
             bot.send_message(user_id, "❌ پیامی برای ارسال وجود ندارد.")
             return
-        # حذف دکمه‌های تأیید
+        
         try:
             bot.edit_message_reply_markup(chat_id, data_obj.get('message_id'), reply_markup=None)
         except:
             pass
-        # شروع ارسال همگانی
+        
+        bot.answer_callback_query(call.id, "📨 شروع ارسال همگانی...", show_alert=False)
         start_broadcast(bot, chat_id, broadcast_text)
+        
         if user_id in user_data:
             del user_data[user_id]
         return
@@ -562,9 +598,8 @@ def handle_callback_query(bot, call, user_data):
         return
     
     elif data == "broadcast_refresh":
-        # بروزرسانی وضعیت ارسال همگانی
         job = broadcast_jobs.get(chat_id)
-        if not job or not job['running']:
+        if not job or not job.get('running', False):
             bot.answer_callback_query(call.id, "❌ ارسال همگانی در حال اجرا نیست.", show_alert=True)
             return
         update_broadcast_progress(bot, chat_id)
@@ -615,7 +650,6 @@ def handle_message(bot, message, user_data, user_last_download=None):
     
     add_user(user_id, username, first_name, last_name)
     
-    # عضویت اجباری
     if not is_admin(user_id):
         is_subscribed, not_subscribed = check_user_subscription(bot, user_id)
         if not is_subscribed:
@@ -629,7 +663,6 @@ def handle_message(bot, message, user_data, user_last_download=None):
             )
             return
     
-    # پردازش مراحل (step)
     step_data = user_data.get(chat_id, {})
     step = step_data.get('step')
     
@@ -711,7 +744,6 @@ def handle_message(bot, message, user_data, user_last_download=None):
             user_data[user_id] = {'broadcast_message': broadcast_text, 'message_id': msg.message_id}
         return
     
-    # /start
     if text and text.startswith('/start'):
         if is_admin(user_id):
             keyboard = get_admin_keyboard()
@@ -721,7 +753,6 @@ def handle_message(bot, message, user_data, user_last_download=None):
             bot.send_message(chat_id, MESSAGES["start"], reply_markup=keyboard)
         return
     
-    # دکمه‌های ادمین
     if is_admin(user_id):
         if text == "📊 آمار ربات":
             if not is_owner(user_id) and not has_permission(user_id, "can_view_stats"):
@@ -755,9 +786,7 @@ def handle_message(bot, message, user_data, user_last_download=None):
             show_settings(bot, chat_id)
             return
     
-    # ===== لینک اینستاگرام =====
     if text and 'instagram.com' in text:
-        # ===== چک کردن محدودیت زمانی =====
         if get_rate_limit_enabled():
             seconds = get_rate_limit_seconds()
             if user_last_download is not None:
@@ -772,7 +801,6 @@ def handle_message(bot, message, user_data, user_last_download=None):
                     )
                     return
         
-        # ===== ادامه دانلود =====
         msg = bot.send_message(chat_id, MESSAGES["downloading"])
         files, error = download_instagram_post(text, user_id)
         
@@ -780,7 +808,6 @@ def handle_message(bot, message, user_data, user_last_download=None):
             bot.edit_message_text(f"❌ {error}", chat_id, msg.message_id)
             return
         
-        # ===== به‌روزرسانی زمان آخرین دانلود =====
         if user_last_download is not None:
             user_last_download[user_id] = time.time()
         

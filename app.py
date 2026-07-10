@@ -18,15 +18,11 @@ if not os.path.exists(DOWNLOAD_DIR):
 logging.basicConfig(level=logging.INFO)
 
 def download_image_direct(shortcode):
-    """دانلود مستقیم عکس از لینک embed (بدون نیاز به کوکی)"""
     try:
         embed_url = f"https://www.instagram.com/p/{shortcode}/embed/"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         response = requests.get(embed_url, headers=headers, timeout=15)
         if response.status_code == 200:
-            # پیدا کردن لینک عکس
             match = re.search(r'<img[^>]+src="([^"]+)"', response.text)
             if match:
                 img_url = match.group(1)
@@ -50,7 +46,7 @@ def download_instagram_post(url):
         shortcode = shortcode_match.group(1)
         logging.info(f"Shortcode: {shortcode}")
 
-        # ===== مرحله ۱: yt-dlp (فیلم‌ها) =====
+        # ===== yt-dlp =====
         ydl_opts = {
             'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
             'quiet': True,
@@ -86,7 +82,7 @@ def download_instagram_post(url):
         except Exception as e:
             logging.warning(f"yt-dlp failed: {e}")
 
-        # ===== مرحله ۲: دانلود مستقیم عکس =====
+        # ===== دانلود مستقیم عکس =====
         logging.info("Trying direct image download...")
         img_file = download_image_direct(shortcode)
         if img_file:
@@ -123,12 +119,20 @@ def webhook():
                         return 'OK', 200
                     
                     for i, f in enumerate(files):
-                        with open(f, 'rb') as media:
-                            if f.endswith('.mp4'):
-                                bot.send_video(chat_id, media, caption=caption if i == 0 else None)
-                            else:
-                                bot.send_photo(chat_id, media, caption=caption if i == 0 else None)
-                        os.remove(f)
+                        try:
+                            with open(f, 'rb') as media:
+                                # ===== کپشن رو کوتاه کن =====
+                                if caption and len(caption) > 1000:
+                                    caption = caption[:1000] + "..."
+                                
+                                if f.endswith('.mp4'):
+                                    bot.send_video(chat_id, media, caption=caption if i == 0 else None)
+                                else:
+                                    bot.send_photo(chat_id, media, caption=caption if i == 0 else None)
+                            os.remove(f)
+                        except Exception as e:
+                            logging.error(f"خطا در ارسال: {e}")
+                            bot.send_message(chat_id, f"خطا در ارسال فایل: {e}")
                     
                     bot.edit_message_text("✅ Done!", chat_id, msg.message_id)
                 else:

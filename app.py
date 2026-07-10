@@ -1,6 +1,7 @@
 from flask import Flask, request
 import telebot
 import logging
+from database import init_db
 
 from config import TOKEN
 from handlers import handle_message, handle_callback_query

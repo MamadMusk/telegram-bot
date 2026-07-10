@@ -150,9 +150,9 @@ def show_stats(chat_id, message_id=None):
     keyboard = get_stats_refresh_keyboard()
     
     if message_id:
-        bot.edit_message_text(text, chat_id, message_id, parse_mode='Markdown', reply_markup=keyboard)
+        bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
     else:
-        bot.send_message(chat_id, text, parse_mode='Markdown', reply_markup=keyboard)
+        bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=keyboard)
 
 def start_broadcast(chat_id):
     msg = bot.send_message(chat_id, MESSAGES["broadcast_prompt"])
@@ -168,7 +168,7 @@ def process_broadcast_message(message):
     count = len(users)
     preview_text = MESSAGES["broadcast_preview"].format(message=broadcast_text, count=count)
     keyboard = get_confirm_keyboard()
-    msg = bot.send_message(chat_id, preview_text, reply_markup=keyboard, parse_mode='Markdown')
+    msg = bot.send_message(chat_id, preview_text, reply_markup=keyboard, parse_mode='HTML')
     bot.user_data = getattr(bot, 'user_data', {})
     bot.user_data[chat_id] = {'broadcast_message': broadcast_text, 'message_id': msg.message_id}
 
@@ -178,16 +178,16 @@ def show_admin_list(chat_id, message_id=None):
         admins_text = "❌ هیچ ادمینی ثبت نشده است."
     else:
         admins_text = "\n".join([
-            f"• `{a['user_id']}` - {a.get('first_name', 'Unknown')} (@{a.get('username', '')}) - نقش: {a['role']}"
+            f"• <code>{a['user_id']}</code> - {a.get('first_name', 'Unknown')} (@{a.get('username', '')}) - نقش: {a['role']}"
             for a in admins
         ])
     text = MESSAGES["admin_list"].format(admins=admins_text)
     keyboard = get_admin_list_inline_keyboard(admins)
     
     if message_id:
-        bot.edit_message_text(text, chat_id, message_id, parse_mode='Markdown', reply_markup=keyboard)
+        bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
     else:
-        bot.send_message(chat_id, text, parse_mode='Markdown', reply_markup=keyboard)
+        bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=keyboard)
 
 def show_force_sub_settings(chat_id, message_id=None):
     channels = get_force_channels()
@@ -196,9 +196,9 @@ def show_force_sub_settings(chat_id, message_id=None):
     keyboard = get_force_sub_inline_keyboard(channels)
     
     if message_id:
-        bot.edit_message_text(text, chat_id, message_id, parse_mode='Markdown', reply_markup=keyboard)
+        bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
     else:
-        bot.send_message(chat_id, text, parse_mode='Markdown', reply_markup=keyboard)
+        bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=keyboard)
 
 def show_settings(chat_id, message_id=None):
     channels = get_force_channels()
@@ -216,9 +216,9 @@ def show_settings(chat_id, message_id=None):
     keyboard = get_settings_inline_keyboard()
     
     if message_id:
-        bot.edit_message_text(text, chat_id, message_id, parse_mode='Markdown', reply_markup=keyboard)
+        bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
     else:
-        bot.send_message(chat_id, text, parse_mode='Markdown', reply_markup=keyboard)
+        bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=keyboard)
 
 def start_add_admin(chat_id):
     msg = bot.send_message(chat_id, MESSAGES["admin_add_prompt"])
@@ -387,7 +387,7 @@ def handle_callback(call):
         else:
             channels_text = "\n".join([f"• {ch}" for ch in not_subscribed])
             bot.answer_callback_query(call.id, "❌ هنوز در همه کانال‌ها عضو نشدی!", show_alert=True)
-            bot.send_message(user_id, MESSAGES["force_sub_required"].format(channels=channels_text))
+            bot.send_message(user_id, MESSAGES["force_sub_required"].format(channels=channels_text), parse_mode='HTML')
         return
     
     # ===== بازگشت =====
@@ -428,7 +428,8 @@ def webhook():
                         bot.send_message(
                             chat_id,
                             MESSAGES["force_sub_required"].format(channels=channels_text),
-                            reply_markup=keyboard
+                            reply_markup=keyboard,
+                            parse_mode='HTML'
                         )
                         return 'OK', 200
                 

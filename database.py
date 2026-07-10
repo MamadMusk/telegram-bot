@@ -8,6 +8,7 @@ import os
 import sqlite3
 import threading
 import json
+import logging
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -15,6 +16,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 from config import DB_PATH, ADMIN_IDS
 
 _write_lock = threading.Lock()
+logger = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
@@ -364,7 +366,7 @@ def get_daily_download_series(days: int = 30) -> List[Dict[str, Any]]:
 
 
 # ============================================================
-#  Admins (RBAC)
+#  Admins (RBAC) - اصلاح شده با لاگ کامل
 # ============================================================
 def is_admin(user_id: int) -> bool:
     if user_id in ADMIN_IDS:
@@ -383,6 +385,7 @@ def get_admin_role(user_id: int) -> Optional[str]:
 
 
 def get_admin_permissions(user_id: int) -> Dict[str, bool]:
+    """دریافت دسترسی‌های ادمین با لاگ کامل"""
     if user_id in ADMIN_IDS:
         return {
             "can_view_stats": True,
@@ -392,13 +395,18 @@ def get_admin_permissions(user_id: int) -> Dict[str, bool]:
             "can_manage_admins": True,
             "can_remove_owner": False
         }
+    
     with get_conn() as conn:
         row = conn.execute(
             "SELECT permissions FROM admins WHERE user_id = ?", (user_id,)
         ).fetchone()
+        
         if row and row["permissions"]:
             try:
-                perms = json.loads(row["permissions"])
+                stored_perms = json.loads(row["permissions"])
+                logger.info(f"📖 Loaded permissions from DB for {user_id}: {stored_perms}")
+                
+                # دیکشنری پیش‌فرض
                 default_perms = {
                     "can_view_stats": True,
                     "can_send_broadcast": False,
@@ -407,11 +415,15 @@ def get_admin_permissions(user_id: int) -> Dict[str, bool]:
                     "can_manage_admins": False,
                     "can_remove_owner": False
                 }
-                default_perms.update(perms)
+                # ادغام با مقادیر ذخیره شده
+                default_perms.update(stored_perms)
+                logger.info(f"📖 Merged permissions for {user_id}: {default_perms}")
                 return default_perms
-            except json.JSONDecodeError:
-                pass
-    return {
+            except json.JSONDecodeError as e:
+                logger.error(f"❌ JSON decode error for {user_id}: {e}")
+    
+    # اگر هیچ مقداری نبود، پیش‌فرض برگردان
+    default = {
         "can_view_stats": True,
         "can_send_broadcast": False,
         "can_manage_force_sub": False,
@@ -419,16 +431,30 @@ def get_admin_permissions(user_id: int) -> Dict[str, bool]:
         "can_manage_admins": False,
         "can_remove_owner": False
     }
+    logger.info(f"📖 Returning default permissions for {user_id}: {default}")
+    return default
 
 
-def update_admin_permissions(user_id: int, permissions: Dict[str, bool]) -> None:
+def update_admin_permissions(user_id: int, permissions: Dict[str, bool]) -> bool:
+    """به‌روزرسانی دسترسی‌های ادمین با لاگ کامل"""
     if user_id in ADMIN_IDS:
-        return
-    with _write_lock, get_conn() as conn:
-        conn.execute(
-            "UPDATE admins SET permissions = ? WHERE user_id = ?",
-            (json.dumps(permissions), user_id)
-        )
+        logger.warning(f"⚠️ Cannot update permissions for owner {user_id}")
+        return False
+    
+    try:
+        perms_json = json.dumps(permissions)
+        with _write_lock, get_conn() as conn:
+            cursor = conn.execute(
+                "UPDATE admins SET permissions = ? WHERE user_id = ?",
+                (perms_json, user_id)
+            )
+            rows_affected = cursor.rowcount
+            logger.info(f"📝 Updated permissions for {user_id}: {permissions}")
+            logger.info(f"📝 Rows affected: {rows_affected}")
+            return rows_affected > 0
+    except Exception as e:
+        logger.error(f"❌ Error updating permissions for {user_id}: {e}")
+        return False
 
 
 def add_admin(user_id: int, role: str = "viewer", permissions: Optional[Dict[str, bool]] = None) -> None:
@@ -446,13 +472,16 @@ def add_admin(user_id: int, role: str = "viewer", permissions: Optional[Dict[str
             "INSERT OR REPLACE INTO admins (user_id, role, permissions) VALUES (?, ?, ?)",
             (user_id, role, json.dumps(permissions))
         )
+        logger.info(f"✅ Admin {user_id} added with permissions: {permissions}")
 
 
 def remove_admin(user_id: int) -> None:
     if user_id in ADMIN_IDS:
+        logger.warning(f"⚠️ Cannot remove owner {user_id}")
         return
     with _write_lock, get_conn() as conn:
         conn.execute("DELETE FROM admins WHERE user_id = ?", (user_id,))
+        logger.info(f"✅ Admin {user_id} removed")
 
 
 def get_all_admins() -> List[Dict[str, Any]]:

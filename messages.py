@@ -169,6 +169,13 @@ def get_broadcast_progress_keyboard():
     keyboard.add(btn_refresh, btn_cancel)
     return keyboard
 
+def get_broadcast_cancel_keyboard():
+    """دکمه لغو ارسال همگانی در مرحله پرامپت"""
+    keyboard = InlineKeyboardMarkup()
+    btn_cancel = InlineKeyboardButton("❌ لغو ارسال", callback_data="broadcast_cancel_start")
+    keyboard.add(btn_cancel)
+    return keyboard
+
 def get_admin_list_inline_keyboard(admins, current_user_id):
     keyboard = InlineKeyboardMarkup(row_width=1)
     for admin in admins:

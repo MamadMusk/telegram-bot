@@ -1,38 +1,74 @@
 """
-config.py — تنظیمات اصلی ربات و توابع کمکی.
-
-همه تنظیمات از متغیرهای محیطی (Environment Variables) خوانده می‌شوند.
-برای شخصی‌سازی، فایل .env را ویرایش کنید.
+config.py — تنظیمات اصلی ربات با pydantic
 """
 
 import os
 from typing import List, Optional
+from pydantic import BaseModel, field_validator
+
+
+class Settings(BaseModel):
+    """مدل تنظیمات با اعتبارسنجی خودکار"""
+    
+    TOKEN: str = "8837695158:AAETrphGJh6wS1bmCXHOFB7-r4YPx0n8KR8"
+    ADMIN_IDS: List[int] = []
+    DB_PATH: str = "users.db"
+    DOWNLOAD_DIR: str = "downloads"
+
+    @field_validator("ADMIN_IDS", mode="before")
+    @classmethod
+    def parse_admin_ids(cls, v):
+        """تبدیل رشته‌ی ADMIN_IDS به لیست اعداد"""
+        if isinstance(v, str):
+            return [int(x.strip()) for x in v.split(",") if x.strip().isdigit()]
+        return v
+
+
+# ===== خواندن از محیط (Environment Variables) =====
+_settings = Settings(
+    TOKEN=os.getenv("BOT_TOKEN", "8837695158:AAETrphGJh6wS1bmCXHOFB7-r4YPx0n8KR8"),
+    ADMIN_IDS=os.getenv("ADMIN_IDS", "1085150385"),
+    DB_PATH=os.getenv("DB_PATH", "users.db"),
+    DOWNLOAD_DIR=os.getenv("DOWNLOAD_DIR", "downloads"),
+)
+
+# ===== صادر کردن متغیرها =====
+TOKEN = _settings.TOKEN
+ADMIN_IDS = _settings.ADMIN_IDS
+DB_PATH = _settings.DB_PATH
+DOWNLOAD_DIR = _settings.DOWNLOAD_DIR
 
 # ============================================================
-#  🔐 متغیرهای اصلی (از .env یا Render)
+#  🔍 توابع کمکی (مشابه قبل)
 # ============================================================
 
-# توکن ربات تلگرام
-TOKEN = os.getenv("BOT_TOKEN", "8837695158:AAETrphGJh6wS1bmCXHOFB7-r4YPx0n8KR8")
+def is_admin(user_id: int) -> bool:
+    """بررسی ادمین بودن کاربر (از env یا دیتابیس)"""
+    if user_id in ADMIN_IDS:
+        return True
+    try:
+        from database import is_admin as db_is_admin
+        return db_is_admin(user_id)
+    except Exception:
+        return False
 
-# آیدی عددی ادمین‌های اصلی (با کاما جدا شده)
-ADMIN_IDS_STR = os.getenv("ADMIN_IDS", "1085150385")
-ADMIN_IDS: List[int] = [
-    int(x.strip()) for x in ADMIN_IDS_STR.split(",")
-    if x.strip().isdigit()
-]
 
-# مسیر دیتابیس
-DB_PATH = os.getenv("DB_PATH", "users.db")
+def is_super_admin(user_id: int) -> bool:
+    """بررسی ادمین اصلی بودن"""
+    if user_id in ADMIN_IDS:
+        return True
+    try:
+        from database import is_super_admin as db_is_super
+        return db_is_super(user_id)
+    except Exception:
+        return False
 
-# مسیر ذخیره فایل‌های دانلود
-DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "downloads")
 
 # ============================================================
-#  📦 تنظیمات پیش‌فرض (برای fallback)
+#  📦 تنظیمات پیش‌فرض برای fallback
 # ============================================================
 
-DEFAULT_SETTINGS: dict = {
+DEFAULT_SETTINGS = {
     "welcome_message": "👋 سلام! به ربات دانلود اینستاگرام خوش آمدید.\n\nلینک پست یا ریلز اینستاگرام را بفرستید تا آن را برایتان دانلود کنم.",
     "daily_quota": "10",
     "max_file_size": "50",
@@ -41,15 +77,9 @@ DEFAULT_SETTINGS: dict = {
     "force_channels": "",
 }
 
-# ============================================================
-#  🔍 توابع کمکی برای خواندن تنظیمات از دیتابیس
-# ============================================================
 
 def get_db_setting(key: str, default: Optional[str] = None) -> str:
-    """
-    خواندن یک تنظیم از دیتابیس.
-    اگر در دیتابیس نبود، از DEFAULT_SETTINGS یا default استفاده می‌کند.
-    """
+    """خواندن یک تنظیم از دیتابیس"""
     try:
         from database import get_setting as db_get
         val = db_get(key)
@@ -77,36 +107,8 @@ def get_db_setting_bool(key: str, default: bool = False) -> bool:
     return val.lower() in ("true", "1", "yes", "on")
 
 
-def is_admin(user_id: int) -> bool:
-    """
-    بررسی ادمین بودن کاربر.
-    ابتدا از ADMIN_IDS (env) چک می‌کند، سپس از دیتابیس.
-    """
-    if user_id in ADMIN_IDS:
-        return True
-    try:
-        from database import is_admin as db_is_admin
-        return db_is_admin(user_id)
-    except Exception:
-        return False
-
-
-def is_super_admin(user_id: int) -> bool:
-    """
-    بررسی ادمین اصلی بودن (دسترسی کامل).
-    ابتدا از ADMIN_IDS (env) چک می‌کند، سپس role='super' از دیتابیس.
-    """
-    if user_id in ADMIN_IDS:
-        return True
-    try:
-        from database import is_super_admin as db_is_super
-        return db_is_super(user_id)
-    except Exception:
-        return False
-
-
 def get_force_channels() -> List[str]:
-    """دریافت لیست کانال‌های اجباری از دیتابیس"""
+    """دریافت لیست کانال‌های اجباری"""
     try:
         from database import get_force_channels_list
         return get_force_channels_list()
@@ -115,40 +117,9 @@ def get_force_channels() -> List[str]:
 
 
 def set_force_channels(channels: List[str]) -> None:
-    """ذخیره لیست کانال‌های اجباری در دیتابیس"""
+    """ذخیره لیست کانال‌های اجباری"""
     try:
         from database import set_force_channels_list
         set_force_channels_list(channels)
     except Exception:
         pass
-
-# ============================================================
-#  ✅ تابع یکپارچه برای دریافت تنظیمات (با کش ساده)
-# ============================================================
-
-# کش ساده برای کاهش ترافیک دیتابیس (اختیاری)
-_SETTINGS_CACHE: dict = {}
-_SETTINGS_CACHE_TIME: dict = {}
-_CACHE_TTL = 60  # 60 ثانیه
-
-
-def get_setting_cached(key: str, default: Optional[str] = None, ttl: int = _CACHE_TTL) -> str:
-    """
-    خواندن تنظیم با کش ساده.
-    بعد از ttl ثانیه، دوباره از دیتابیس می‌خواند.
-    """
-    import time
-    now = time.time()
-    if key in _SETTINGS_CACHE and (now - _SETTINGS_CACHE_TIME.get(key, 0)) < ttl:
-        return _SETTINGS_CACHE[key]
-    
-    value = get_db_setting(key, default)
-    _SETTINGS_CACHE[key] = value
-    _SETTINGS_CACHE_TIME[key] = now
-    return value
-
-
-def invalidate_cache() -> None:
-    """پاک کردن کش تنظیمات (بعد از به‌روزرسانی)"""
-    _SETTINGS_CACHE.clear()
-    _SETTINGS_CACHE_TIME.clear()

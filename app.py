@@ -16,29 +16,22 @@ if not os.path.exists(DOWNLOAD_DIR):
 logging.basicConfig(level=logging.INFO)
 
 # ===== راه‌اندازی دانلودر =====
-# verbose=True یعنی اگر خطایی بود، بهت تو لاگ نشون بده
 downloader = InstagramDownloader(verbose=True)
 
 def download_instagram_post(url):
-    """
-    دانلود هر نوع محتوایی از اینستاگرام با parth-dl
-    """
     try:
         logging.info(f"شروع دانلود: {url}")
         
-        # متد download لیستی از مسیر فایل‌های دانلود شده رو برمی‌گردونه
-        downloaded_files = downloader.download(url, output_dir=DOWNLOAD_DIR)
+        # ✅ اینجا output_path هست، نه output_dir
+        downloaded_files = downloader.download(url, output_path=DOWNLOAD_DIR)
         
         if not downloaded_files:
-            return None, "هیچ چیزی دانلود نشد. مطمئن شو لینک درسته و پست عمومی هست."
+            return None, "هیچ چیزی دانلود نشد"
         
-        # اگه فقط یه فایل باشه، تبدیلش به لیست می‌کنیم
         if isinstance(downloaded_files, str):
             downloaded_files = [downloaded_files]
             
-        logging.info(f"{len(downloaded_files)} فایل با موفقیت دانلود شد.")
-        
-        # متاسفانه parth-dl کپشن رو برنمی‌گردونه، پس خالی می‌فرستیم
+        logging.info(f"{len(downloaded_files)} فایل دانلود شد")
         return downloaded_files, ""
         
     except Exception as e:
@@ -70,7 +63,6 @@ def webhook():
                         bot.edit_message_text(f"❌ {caption}", chat_id, msg.message_id)
                         return 'OK', 200
                     
-                    # ارسال فایل‌ها به کاربر
                     for i, f in enumerate(files):
                         try:
                             if os.path.exists(f):
@@ -79,7 +71,7 @@ def webhook():
                                         bot.send_video(chat_id, media, caption=caption if i == 0 else None)
                                     else:
                                         bot.send_photo(chat_id, media, caption=caption if i == 0 else None)
-                                os.remove(f)  # پاک کردن فایل بعد از ارسال
+                                os.remove(f)
                                 logging.info(f"فایل ارسال و پاک شد: {f}")
                         except Exception as e:
                             logging.error(f"خطا در ارسال فایل {f}: {e}")

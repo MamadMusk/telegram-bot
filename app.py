@@ -2,10 +2,9 @@ from flask import Flask, request
 import telebot
 import os
 import re
-import yt_dlp
+import instaloader
 import logging
 import time
-import subprocess
 
 TOKEN = "8837695158:AAETrphGJh6wS1bmCXHOFB7-r4YPx0n8KR8"
 bot = telebot.TeleBot(TOKEN)
@@ -17,103 +16,60 @@ if not os.path.exists(DOWNLOAD_DIR):
 
 logging.basicConfig(level=logging.INFO)
 
-def download_with_gallery_dl(url, output_dir):
-    """
-    دانلود با gallery-dl با استفاده از فایل cookies.txt
-    """
-    try:
-        # اگه فایل کوکی وجود نداشت، از روش بدون کوکی امتحان کن
-        cookie_option = []
-        if os.path.exists("cookies.txt"):
-            cookie_option = ["--cookies", "cookies.txt"]
-            logging.info("✅ Using cookies.txt")
-        else:
-            logging.warning("⚠️ cookies.txt not found, trying without cookies")
-        
-        cmd = [
-            "gallery-dl",
-            "-D", output_dir,
-            "-o", "filename={shortcode}_{num}.{extension}",
-        ] + cookie_option + [url]
-        
-        logging.info(f"Running: {' '.join(cmd)}")
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        
-        if result.returncode != 0:
-            logging.error(f"gallery-dl failed: {result.stderr}")
-            return None
-        
-        # پیدا کردن فایل‌های دانلود شده
-        downloaded_files = []
-        for root, dirs, files in os.walk(output_dir):
-            for file in files:
-                if file.endswith(('.jpg', '.jpeg', '.png', '.mp4', '.mov')):
-                    downloaded_files.append(os.path.join(root, file))
-        
-        if downloaded_files:
-            logging.info(f"✅ gallery-dl downloaded {len(downloaded_files)} files")
-            return downloaded_files
-        else:
-            return None
-            
-    except subprocess.TimeoutExpired:
-        logging.error("gallery-dl timeout")
-        return None
-    except Exception as e:
-        logging.error(f"gallery-dl error: {e}")
-        return None
+# ===== تنظیمات اینستاگرام =====
+INSTAGRAM_USERNAME = "YOUR_INSTAGRAM_USERNAME"  # یوزرنیم خودت رو بذار
+INSTAGRAM_PASSWORD = "YOUR_INSTAGRAM_PASSWORD"  # پسورد خودت رو بذار
+
+# ایجاد شیء instaloader با لاگین مستقیم
+loader = instaloader.Instaloader(
+    download_pictures=True,
+    download_videos=True,
+    download_video_thumbnails=False,
+    compress_json=False,
+    save_metadata=False,
+    post_metadata_txt_pattern='',
+    max_connection_attempts=3
+)
+
+# لاگین مستقیم با یوزرنیم و پسورد
+try:
+    loader.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+    logging.info("✅ Instagram login successful!")
+except Exception as e:
+    logging.error(f"❌ Login failed: {e}")
 
 def download_instagram_post(url):
+    """
+    دانلود با instaloader با لاگین مستقیم
+    """
+    files = []
+    caption = ""
+    
+    shortcode_match = re.search(r'/(?:p|reel|tv|stories)/([^/?]+)', url)
+    if not shortcode_match:
+        return None, "لینک معتبر نیست."
+    shortcode = shortcode_match.group(1)
+    logging.info(f"Shortcode: {shortcode}")
+    
     try:
-        logging.info(f"Downloading: {url}")
+        # دریافت پست
+        post = instaloader.Post.from_shortcode(loader.context, shortcode)
         
-        # ===== مرحله ۱: yt-dlp (برای فیلم‌ها) =====
-        ydl_opts = {
-            'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
-            'quiet': True,
-            'no_warnings': False,
-            'cookiefile': 'cookies.txt' if os.path.exists("cookies.txt") else None,
-            'format': 'best[ext=mp4]/best',
-            'ignoreerrors': True,
-        }
+        # دانلود پست
+        loader.download_post(post, target=shortcode)
         
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                files = []
-                caption = ""
-                
-                if info:
-                    if 'entries' in info and info['entries']:
-                        for entry in info['entries']:
-                            if entry:
-                                filename = ydl.prepare_filename(entry)
-                                if os.path.exists(filename):
-                                    files.append(filename)
-                        if info['entries'] and info['entries'][0]:
-                            caption = info['entries'][0].get('description', '')
-                    else:
-                        filename = ydl.prepare_filename(info)
-                        if os.path.exists(filename):
-                            files.append(filename)
-                        caption = info.get('description', '')
-                
-                if files:
-                    logging.info(f"✅ yt-dlp downloaded {len(files)} files")
-                    return files, caption
-                    
-        except Exception as e:
-            logging.warning(f"yt-dlp failed: {e}")
+        # پیدا کردن فایل‌های دانلود شده
+        for file in os.listdir('.'):
+            if file.startswith(shortcode) and (file.endswith('.jpg') or file.endswith('.png') or file.endswith('.mp4')):
+                files.append(os.path.join('.', file))
         
-        # ===== مرحله ۲: gallery-dl (برای عکس‌ها) =====
-        logging.info("Trying gallery-dl as fallback...")
-        files = download_with_gallery_dl(url, DOWNLOAD_DIR)
+        caption = post.caption if post.caption else ""
         
         if files:
-            return files, ""
+            logging.info(f"✅ Downloaded {len(files)} files")
+            return files, caption
         else:
-            return None, "هیچ محتوایی برای دانلود پیدا نشد. مطمئن شو فایل cookies.txt معتبر هست و پست عمومی هست."
+            return None, "هیچ فایلی دانلود نشد."
             
     except Exception as e:
         logging.error(f"Download error: {e}")
@@ -154,7 +110,6 @@ def webhook():
                                     with open(f, 'rb') as photo:
                                         bot.send_photo(chat_id, photo, caption=caption if i == 0 else None)
                                 os.remove(f)
-                                logging.info(f"Sent and removed: {f}")
                         except Exception as e:
                             logging.error(f"Error sending {f}: {e}")
                     

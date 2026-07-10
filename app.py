@@ -55,7 +55,7 @@ def check_user_subscription(user_id):
             member = bot.get_chat_member(channel, user_id)
             if member.status not in ['creator', 'administrator', 'member']:
                 not_subscribed.append(channel)
-        except Exception:
+        except:
             not_subscribed.append(channel)
     return len(not_subscribed) == 0, not_subscribed
 
@@ -135,6 +135,7 @@ def download_instagram_post(url, user_id):
 def show_stats(chat_id):
     stats = get_stats()
     total_downloads = get_total_downloads()
+    
     text = MESSAGES["stats_text"].format(
         total=stats.get('users', 0),
         today=stats.get('today_downloads', 0),
@@ -203,7 +204,7 @@ def handle_callback(call):
                 logging.error(f"Failed to send to {user['user_id']}: {e}")
         try:
             bot.edit_message_reply_markup(user_id, data_obj.get('message_id'), reply_markup=None)
-        except Exception:
+        except:
             pass
         bot.send_message(user_id, MESSAGES["broadcast_success"].format(count=success_count))
         if user_id in bot.user_data:
@@ -216,7 +217,7 @@ def handle_callback(call):
         data_obj = bot.user_data.get(user_id, {})
         try:
             bot.edit_message_reply_markup(user_id, data_obj.get('message_id'), reply_markup=None)
-        except Exception:
+        except:
             pass
         bot.send_message(user_id, MESSAGES["broadcast_cancelled"])
         if user_id in bot.user_data:
@@ -299,6 +300,13 @@ def webhook():
                         return 'OK', 200
                     elif text == "🔙 بازگشت":
                         bot.send_message(chat_id, MESSAGES["start"], reply_markup=get_admin_keyboard())
+                        return 'OK', 200
+                    elif text == "📋 مدیریت ادمین‌ها":
+                        # فعلاً پیام ساده
+                        bot.send_message(chat_id, "📋 بخش مدیریت ادمین‌ها در حال توسعه است.")
+                        return 'OK', 200
+                    elif text == "⚙️ تنظیمات ربات":
+                        bot.send_message(chat_id, "⚙️ بخش تنظیمات ربات در حال توسعه است.")
                         return 'OK', 200
                 
                 # ===== پردازش لینک =====

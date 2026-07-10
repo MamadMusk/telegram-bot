@@ -13,7 +13,7 @@ from messages import (
     get_stats_refresh_keyboard, get_admin_list_inline_keyboard,
     get_settings_inline_keyboard, get_force_sub_inline_keyboard,
     get_rate_limit_keyboard, get_admin_permissions_keyboard,
-    get_broadcast_progress_keyboard
+    get_broadcast_progress_keyboard, get_broadcast_cancel_keyboard
 )
 from database import (
     add_user, get_all_users, get_stats,
@@ -277,9 +277,53 @@ def show_rate_limit_settings(bot, chat_id, message_id=None):
         logging.error(f"Error in show_rate_limit_settings: {e}")
 
 # ===================================================
-# 📨 ارسال همگانی با نمایش پیشرفت
+# 📨 ارسال همگانی با نمایش پیشرفت و دکمه لغو
 # ===================================================
-def start_broadcast(bot, chat_id, broadcast_text):
+def start_broadcast(bot, chat_id):
+    """نمایش پیام پرامپت با دکمه لغو"""
+    try:
+        logging.info(f"📨 start_broadcast called for {chat_id}")
+        keyboard = get_broadcast_cancel_keyboard()
+        msg = bot.send_message(
+            chat_id, 
+            MESSAGES["broadcast_prompt"],
+            reply_markup=keyboard
+        )
+        # ذخیره message_id برای حذف بعدی
+        if not hasattr(bot, 'user_data'):
+            bot.user_data = {}
+        bot.user_data[chat_id] = {'step': 'broadcast', 'message_id': msg.message_id}
+        logging.info(f"✅ start_broadcast set step for {chat_id}")
+    except Exception as e:
+        logging.error(f"❌ Error in start_broadcast: {e}")
+
+def process_broadcast_message(bot, message):
+    """پردازش پیام دریافتی برای ارسال همگانی"""
+    chat_id = message.chat.id
+    broadcast_text = message.text
+    
+    # حذف پیام پرامپت قبلی
+    try:
+        if chat_id in bot.user_data and 'message_id' in bot.user_data[chat_id]:
+            bot.delete_message(chat_id, bot.user_data[chat_id]['message_id'])
+    except:
+        pass
+    
+    if not broadcast_text or len(broadcast_text.strip()) == 0:
+        bot.send_message(chat_id, MESSAGES["broadcast_empty"])
+        if chat_id in bot.user_data:
+            del bot.user_data[chat_id]
+        return
+    
+    users = get_all_users()
+    count = len(users)
+    preview_text = MESSAGES["broadcast_preview"].format(message=broadcast_text, count=count)
+    keyboard = get_confirm_keyboard()
+    msg = bot.send_message(chat_id, preview_text, reply_markup=keyboard, parse_mode='HTML')
+    bot.user_data[chat_id] = {'broadcast_message': broadcast_text, 'message_id': msg.message_id}
+
+def start_broadcast_send(bot, chat_id, broadcast_text):
+    """شروع ارسال همگانی با نمایش پیشرفت"""
     users = get_all_users()
     total = len(users)
     if total == 0:
@@ -629,12 +673,25 @@ def handle_callback_query(bot, call, user_data):
         return
     
     # ===== ارسال همگانی =====
+    elif data == "broadcast_cancel_start":
+        bot.answer_callback_query(call.id, "❌ ارسال لغو شد!", show_alert=True)
+        # حذف پیام پرامپت
+        try:
+            bot.delete_message(chat_id, message_id)
+        except:
+            pass
+        # پاک کردن مرحله
+        if chat_id in bot.user_data:
+            del bot.user_data[chat_id]
+        bot.send_message(chat_id, "❌ عملیات ارسال همگانی لغو شد.")
+        return
+    
     elif data == "broadcast_confirm":
         if not is_owner(user_id) and not has_permission(user_id, "can_send_broadcast"):
             bot.answer_callback_query(call.id, MESSAGES["admin_no_permission"], show_alert=True)
             return
         
-        data_obj = user_data.get(user_id, {})
+        data_obj = bot.user_data.get(user_id, {})
         broadcast_text = data_obj.get('broadcast_message', '')
         if not broadcast_text:
             bot.send_message(user_id, "❌ پیامی برای ارسال وجود ندارد.")
@@ -646,22 +703,22 @@ def handle_callback_query(bot, call, user_data):
             pass
         
         bot.answer_callback_query(call.id, "📨 شروع ارسال همگانی...", show_alert=False)
-        start_broadcast(bot, chat_id, broadcast_text)
+        start_broadcast_send(bot, chat_id, broadcast_text)
         
-        if user_id in user_data:
-            del user_data[user_id]
+        if user_id in bot.user_data:
+            del bot.user_data[user_id]
         return
     
     elif data == "broadcast_cancel":
         bot.answer_callback_query(call.id, "❌ لغو شد", show_alert=False)
-        data_obj = user_data.get(user_id, {})
+        data_obj = bot.user_data.get(user_id, {})
         try:
             bot.edit_message_reply_markup(chat_id, data_obj.get('message_id'), reply_markup=None)
         except:
             pass
         bot.send_message(user_id, MESSAGES["broadcast_cancelled"])
-        if user_id in user_data:
-            del user_data[user_id]
+        if user_id in bot.user_data:
+            del bot.user_data[user_id]
         return
     
     elif data == "broadcast_refresh":
@@ -800,16 +857,8 @@ def handle_message(bot, message, user_data, user_last_download=None):
         if not is_owner(user_id) and not has_permission(user_id, "can_send_broadcast"):
             bot.send_message(chat_id, MESSAGES["admin_no_permission"])
             return
-        broadcast_text = text
-        if not broadcast_text or len(broadcast_text.strip()) == 0:
-            bot.send_message(chat_id, MESSAGES["broadcast_empty"])
-        else:
-            users = get_all_users()
-            count = len(users)
-            preview_text = MESSAGES["broadcast_preview"].format(message=broadcast_text, count=count)
-            keyboard = get_confirm_keyboard()
-            msg = bot.send_message(chat_id, preview_text, reply_markup=keyboard, parse_mode='HTML')
-            user_data[user_id] = {'broadcast_message': broadcast_text, 'message_id': msg.message_id}
+        # اینجا پیام از مرحله پرامپت میاد، پس پردازشش کن
+        process_broadcast_message(bot, message)
         return
     
     # ===== /start =====
@@ -834,8 +883,7 @@ def handle_message(bot, message, user_data, user_last_download=None):
             if not is_owner(user_id) and not has_permission(user_id, "can_send_broadcast"):
                 bot.send_message(chat_id, MESSAGES["admin_no_permission"])
                 return
-            msg = bot.send_message(chat_id, MESSAGES["broadcast_prompt"])
-            user_data[chat_id] = {'step': 'broadcast', 'message_id': msg.message_id}
+            start_broadcast(bot, chat_id)
             return
         elif text == "🔒 قفل اسپانسر":
             if not is_owner(user_id) and not has_permission(user_id, "can_manage_force_sub"):

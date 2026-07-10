@@ -9,19 +9,23 @@ app = Flask(__name__)
 
 logging.basicConfig(level=logging.INFO)
 
-# ===== یه هندلر ساده برای همه پیام‌ها =====
-@bot.message_handler(func=lambda message: True)
-def echo_all(message):
-    bot.reply_to(message, "سلام! پیامت رو دریافت کردم.")
-
-# ===== Webhook =====
 @app.route('/', methods=['POST'])
 def webhook():
     try:
         json_string = request.get_data().decode('utf-8')
         logging.info("📩 Webhook received")
+        
         update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
+        
+        # ===== پردازش دستی پیام =====
+        if update.message:
+            chat_id = update.message.chat.id
+            text = update.message.text
+            logging.info(f"📨 Message from {chat_id}: {text}")
+            
+            # پاسخ به پیام
+            bot.send_message(chat_id, f"سلام! پیامت رو دریافت کردم: {text}")
+        
         return 'OK', 200
     except Exception as e:
         logging.error(f"❌ Webhook error: {e}")

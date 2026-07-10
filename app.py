@@ -55,7 +55,7 @@ def check_user_subscription(user_id):
             member = bot.get_chat_member(channel, user_id)
             if member.status not in ['creator', 'administrator', 'member']:
                 not_subscribed.append(channel)
-        except:
+        except Exception:
             not_subscribed.append(channel)
     return len(not_subscribed) == 0, not_subscribed
 
@@ -83,7 +83,7 @@ def download_image_direct(shortcode):
         logging.error(f"Direct image error: {e}")
         return None
 
-def download_instagram_post(url):
+def download_instagram_post(url, user_id):
     try:
         shortcode_match = re.search(r'/(?:p|reel|tv)/([^/?]+)', url)
         if not shortcode_match:
@@ -114,14 +114,14 @@ def download_instagram_post(url):
                         if os.path.exists(fname):
                             files.append(fname)
                 if files:
-                    increment_download()
+                    increment_download(user_id)
                     return files, None
         except Exception as e:
             logging.warning(f"yt-dlp failed: {e}")
 
         img_file = download_image_direct(shortcode)
         if img_file:
-            increment_download()
+            increment_download(user_id)
             return [img_file], None
 
         return None, MESSAGES["download_failed"]
@@ -136,10 +136,10 @@ def show_stats(chat_id):
     stats = get_stats()
     total_downloads = get_total_downloads()
     text = MESSAGES["stats_text"].format(
-        total=stats['total'],
-        today=stats['today'],
-        week=stats['week'],
-        month=stats['month'],
+        total=stats.get('users', 0),
+        today=stats.get('today_downloads', 0),
+        week=stats.get('active_users_7d', 0),
+        month=stats.get('month', 0),
         downloads=total_downloads
     )
     bot.send_message(chat_id, text, parse_mode='Markdown')
@@ -203,7 +203,7 @@ def handle_callback(call):
                 logging.error(f"Failed to send to {user['user_id']}: {e}")
         try:
             bot.edit_message_reply_markup(user_id, data_obj.get('message_id'), reply_markup=None)
-        except:
+        except Exception:
             pass
         bot.send_message(user_id, MESSAGES["broadcast_success"].format(count=success_count))
         if user_id in bot.user_data:
@@ -216,7 +216,7 @@ def handle_callback(call):
         data_obj = bot.user_data.get(user_id, {})
         try:
             bot.edit_message_reply_markup(user_id, data_obj.get('message_id'), reply_markup=None)
-        except:
+        except Exception:
             pass
         bot.send_message(user_id, MESSAGES["broadcast_cancelled"])
         if user_id in bot.user_data:
@@ -304,7 +304,7 @@ def webhook():
                 # ===== پردازش لینک =====
                 if text and 'instagram.com' in text:
                     msg = bot.send_message(chat_id, MESSAGES["downloading"])
-                    files, error = download_instagram_post(text)
+                    files, error = download_instagram_post(text, user_id)
                     
                     if not files:
                         bot.edit_message_text(f"❌ {error}", chat_id, msg.message_id)

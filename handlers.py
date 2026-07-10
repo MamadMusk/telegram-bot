@@ -49,7 +49,8 @@ def check_user_subscription(bot, user_id):
             member = bot.get_chat_member(channel, user_id)
             if member.status not in ['creator', 'administrator', 'member']:
                 not_subscribed.append(channel)
-        except:
+        except Exception as e:
+            logging.error(f"Error checking subscription for {channel}: {e}")
             not_subscribed.append(channel)
     return len(not_subscribed) == 0, not_subscribed
 
@@ -129,7 +130,7 @@ def download_instagram_post(url, user_id):
 
         return None, MESSAGES["download_failed"]
     except Exception as e:
-        logging.error(f"Error: {e}")
+        logging.error(f"Error in download_instagram_post: {e}")
         return None, str(e)
 
 # ===================================================
@@ -415,13 +416,13 @@ def handle_callback_query(bot, call, user_data):
         return
     
     elif data.startswith("admin_perm_toggle_"):
-        # ===== اصلاح: استفاده از split با maxsplit=4 =====
-        parts = data.split('_', 4)  # ['admin', 'perm', 'toggle', '8560242593', 'can_send_broadcast']
+        parts = data.split('_', 4)
         if len(parts) < 5:
             logging.error(f"Invalid callback data: {data}")
+            bot.answer_callback_query(call.id, "❌ خطا در پردازش", show_alert=True)
             return
         admin_id = int(parts[3])
-        perm_key = parts[4]  # کلید کامل مثلاً 'can_send_broadcast'
+        perm_key = parts[4]
         
         logging.info(f"🔄 Toggle permission: {perm_key} for admin {admin_id}")
         
@@ -437,17 +438,23 @@ def handle_callback_query(bot, call, user_data):
             bot.answer_callback_query(call.id, MESSAGES["admin_cant_remove_owner"], show_alert=True)
             return
         
-        # ===== ۳. دریافت و تغییر =====
+        # ===== ۳. دریافت دسترسی‌های فعلی =====
         perms = get_admin_permissions(admin_id)
+        logging.info(f"📖 Current permissions: {perms}")
+        
         old_value = perms.get(perm_key, False)
         new_value = not old_value
         perms[perm_key] = new_value
         logging.info(f"🔄 Changing {perm_key} from {old_value} to {new_value}")
         
         # ===== ۴. ذخیره در دیتابیس =====
-        update_admin_permissions(admin_id, perms)
+        success = update_admin_permissions(admin_id, perms)
+        if not success:
+            logging.error(f"❌ Failed to update permissions for {admin_id}")
+            bot.answer_callback_query(call.id, "❌ خطا در ذخیره دسترسی!", show_alert=True)
+            return
         
-        # ===== ۵. بررسی مجدد =====
+        # ===== ۵. دریافت مجدد برای تأیید =====
         check_perms = get_admin_permissions(admin_id)
         logging.info(f"✅ After update: {check_perms}")
         
@@ -461,14 +468,14 @@ def handle_callback_query(bot, call, user_data):
 👤 {name} (ID: {admin_id})
 📋 نقش: {role}
 
-• مشاهده آمار: {"✅" if perms.get("can_view_stats", False) else "❌"}
-• ارسال همگانی: {"✅" if perms.get("can_send_broadcast", False) else "❌"}
-• قفل اسپانسر: {"✅" if perms.get("can_manage_force_sub", False) else "❌"}
-• تنظیمات: {"✅" if perms.get("can_manage_settings", False) else "❌"}
-• مدیریت ادمین‌ها: {"✅" if perms.get("can_manage_admins", False) else "❌"}
+• مشاهده آمار: {"✅" if check_perms.get("can_view_stats", False) else "❌"}
+• ارسال همگانی: {"✅" if check_perms.get("can_send_broadcast", False) else "❌"}
+• قفل اسپانسر: {"✅" if check_perms.get("can_manage_force_sub", False) else "❌"}
+• تنظیمات: {"✅" if check_perms.get("can_manage_settings", False) else "❌"}
+• مدیریت ادمین‌ها: {"✅" if check_perms.get("can_manage_admins", False) else "❌"}
 """
         
-        keyboard = get_admin_permissions_keyboard(admin_id, perms, is_owner=False)
+        keyboard = get_admin_permissions_keyboard(admin_id, check_perms, is_owner=False)
         
         # ===== ۷. ادیت پیام =====
         try:
@@ -723,6 +730,7 @@ def handle_message(bot, message, user_data, user_last_download=None):
             )
             return
     
+    # پردازش مراحل (step)
     step_data = user_data.get(chat_id, {})
     step = step_data.get('step')
     
@@ -804,6 +812,7 @@ def handle_message(bot, message, user_data, user_last_download=None):
             user_data[user_id] = {'broadcast_message': broadcast_text, 'message_id': msg.message_id}
         return
     
+    # ===== /start =====
     if text and text.startswith('/start'):
         if is_admin(user_id):
             keyboard = get_admin_keyboard()
@@ -813,6 +822,7 @@ def handle_message(bot, message, user_data, user_last_download=None):
             bot.send_message(chat_id, MESSAGES["start"], reply_markup=keyboard)
         return
     
+    # ===== دکمه‌های ادمین =====
     if is_admin(user_id):
         if text == "📊 آمار ربات":
             if not is_owner(user_id) and not has_permission(user_id, "can_view_stats"):
@@ -846,13 +856,13 @@ def handle_message(bot, message, user_data, user_last_download=None):
             show_settings(bot, chat_id)
             return
     
+    # ===== لینک اینستاگرام =====
     if text and 'instagram.com' in text:
         if get_rate_limit_enabled():
             seconds = get_rate_limit_seconds()
             if user_last_download is not None:
                 last_download = user_last_download.get(user_id, 0)
                 elapsed = time.time() - last_download
-                
                 if elapsed < seconds:
                     remaining = int(seconds - elapsed)
                     bot.send_message(

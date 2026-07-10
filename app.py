@@ -1,12 +1,13 @@
 from flask import Flask, request
 import telebot
+import os
 import logging
 
 from config import TOKEN
 from handlers import handle_message, handle_callback_query
 from database import init_db
 
-# ===== راه‌اندازی دیتابیس (قبل از هر چیز) =====
+# ===== راه‌اندازی دیتابیس =====
 init_db()
 
 bot = telebot.TeleBot(TOKEN)

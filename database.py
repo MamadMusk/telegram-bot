@@ -8,6 +8,7 @@ import os
 import sqlite3
 import threading
 import time
+import json
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -74,11 +75,13 @@ def init_db() -> None:
                 FOREIGN KEY(user_id) REFERENCES users(id)
             )
         """)
+        # ==== جدول admins با ستون permissions ====
         c.execute("""
             CREATE TABLE IF NOT EXISTS admins (
                 user_id    INTEGER PRIMARY KEY,
                 role       TEXT DEFAULT 'viewer',
-                added_at   TEXT DEFAULT (datetime('now'))
+                added_at   TEXT DEFAULT (datetime('now')),
+                permissions TEXT DEFAULT '{}'
             )
         """)
         defaults = [
@@ -92,8 +95,19 @@ def init_db() -> None:
             ("rate_limit_seconds", "30"),
         ]
         c.executemany("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", defaults)
+        # اضافه کردن ادمین‌های اصلی با role=owner و همه دسترسی‌ها
         for admin_id in ADMIN_IDS:
-            c.execute("INSERT OR IGNORE INTO admins (user_id, role) VALUES (?, 'super')", (admin_id,))
+            c.execute(
+                "INSERT OR IGNORE INTO admins (user_id, role, permissions) VALUES (?, 'owner', ?)",
+                (admin_id, json.dumps({
+                    "can_view_stats": True,
+                    "can_send_broadcast": True,
+                    "can_manage_force_sub": True,
+                    "can_manage_settings": True,
+                    "can_manage_admins": True,
+                    "can_remove_owner": False  # هیچکس نمی‌تونه owner رو حذف کنه
+                }))
+            )
         c.execute("CREATE INDEX IF NOT EXISTS idx_downloads_user ON downloads(user_id);")
         c.execute("CREATE INDEX IF NOT EXISTS idx_downloads_date ON downloads(download_date DESC);")
         c.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);")
@@ -315,7 +329,7 @@ def get_daily_download_series(days: int = 30) -> List[Dict[str, Any]]:
         return [{"date": r["d"], "count": r["c"]} for r in rows]
 
 # ============================================================
-#  Admins
+#  Admins (با پشتیبانی از permissions)
 # ============================================================
 def is_admin(user_id: int) -> bool:
     if user_id in ADMIN_IDS:
@@ -326,32 +340,96 @@ def is_admin(user_id: int) -> bool:
 
 def get_admin_role(user_id: int) -> Optional[str]:
     if user_id in ADMIN_IDS:
-        return "super"
+        return "owner"
     with get_conn() as conn:
         row = conn.execute("SELECT role FROM admins WHERE user_id = ?", (user_id,)).fetchone()
         return row["role"] if row else None
 
-def add_admin(user_id: int, role: str = "viewer") -> None:
+def get_admin_permissions(user_id: int) -> Dict[str, bool]:
+    if user_id in ADMIN_IDS:
+        # owner همه دسترسی‌ها رو داره
+        return {
+            "can_view_stats": True,
+            "can_send_broadcast": True,
+            "can_manage_force_sub": True,
+            "can_manage_settings": True,
+            "can_manage_admins": True,
+            "can_remove_owner": False
+        }
+    with get_conn() as conn:
+        row = conn.execute("SELECT permissions FROM admins WHERE user_id = ?", (user_id,)).fetchone()
+        if row:
+            try:
+                return json.loads(row["permissions"])
+            except:
+                pass
+    # پیش‌فرض: فقط مشاهده آمار
+    return {
+        "can_view_stats": True,
+        "can_send_broadcast": False,
+        "can_manage_force_sub": False,
+        "can_manage_settings": False,
+        "can_manage_admins": False,
+        "can_remove_owner": False
+    }
+
+def update_admin_permissions(user_id: int, permissions: Dict[str, bool]) -> None:
+    # نباید اجازه بدیم owner رو تغییر بدن
+    if user_id in ADMIN_IDS:
+        return
     with _write_lock, get_conn() as conn:
-        conn.execute("INSERT OR REPLACE INTO admins (user_id, role) VALUES (?, ?)", (user_id, role))
+        conn.execute(
+            "UPDATE admins SET permissions = ? WHERE user_id = ?",
+            (json.dumps(permissions), user_id)
+        )
+
+def add_admin(user_id: int, role: str = "viewer", permissions: Optional[Dict[str, bool]] = None) -> None:
+    if permissions is None:
+        permissions = {
+            "can_view_stats": True,
+            "can_send_broadcast": False,
+            "can_manage_force_sub": False,
+            "can_manage_settings": False,
+            "can_manage_admins": False,
+            "can_remove_owner": False
+        }
+    with _write_lock, get_conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO admins (user_id, role, permissions) VALUES (?, ?, ?)",
+            (user_id, role, json.dumps(permissions))
+        )
 
 def remove_admin(user_id: int) -> None:
+    # نمی‌ذاریم owner رو حذف کنن
+    if user_id in ADMIN_IDS:
+        return
     with _write_lock, get_conn() as conn:
         conn.execute("DELETE FROM admins WHERE user_id = ?", (user_id,))
 
 def get_all_admins() -> List[Dict[str, Any]]:
     with get_conn() as conn:
         rows = conn.execute("""
-            SELECT a.user_id, a.role, a.added_at, u.username, u.first_name, u.last_name
+            SELECT a.user_id, a.role, a.added_at, a.permissions,
+                   u.username, u.first_name, u.last_name
             FROM admins a
             LEFT JOIN users u ON a.user_id = u.id
             ORDER BY a.added_at ASC
         """).fetchall()
-        return [dict(r) for r in rows]
-
-def update_admin_role(user_id: int, new_role: str) -> None:
-    with _write_lock, get_conn() as conn:
-        conn.execute("UPDATE admins SET role = ? WHERE user_id = ?", (new_role, user_id))
+        result = []
+        for r in rows:
+            d = dict(r)
+            if d['user_id'] in ADMIN_IDS:
+                d['role'] = 'owner'
+                d['permissions'] = json.dumps({
+                    "can_view_stats": True,
+                    "can_send_broadcast": True,
+                    "can_manage_force_sub": True,
+                    "can_manage_settings": True,
+                    "can_manage_admins": True,
+                    "can_remove_owner": False
+                })
+            result.append(d)
+        return result
 
 def is_super_admin(user_id: int) -> bool:
     if user_id in ADMIN_IDS:
@@ -387,19 +465,16 @@ def remove_force_channel(channel: str) -> bool:
     return False
 
 # ============================================================
-#  ⏱️ محدودیت زمانی (Rate Limit)
+#  Rate Limit
 # ============================================================
 def get_rate_limit_enabled() -> bool:
-    """دریافت وضعیت فعال بودن محدودیت زمانی"""
     val = get_setting("rate_limit_enabled", "False")
     return val.lower() == "true"
 
 def set_rate_limit_enabled(enabled: bool) -> None:
-    """تنظیم وضعیت فعال بودن محدودیت زمانی"""
     set_setting("rate_limit_enabled", "True" if enabled else "False")
 
 def get_rate_limit_seconds() -> int:
-    """دریافت زمان انتظار به ثانیه"""
     val = get_setting("rate_limit_seconds", "30")
     try:
         return int(val)
@@ -407,7 +482,6 @@ def get_rate_limit_seconds() -> int:
         return 30
 
 def set_rate_limit_seconds(seconds: int) -> None:
-    """تنظیم زمان انتظار به ثانیه"""
     set_setting("rate_limit_seconds", str(seconds))
 
 # ============================================================

@@ -6,7 +6,7 @@ import os
 from typing import List, Optional
 
 # ===== تنظیمات اصلی (از env) =====
-TOKEN = os.getenv("BOT_TOKEN", "8837695158:AAETrphGJh6wS1bmCXHOFB7-r4YPx0n8KR8")
+TOKEN = os.getenv("BOT_TOKEN", "8837695158:AAHmNAVxZU98wDXpIFC7_0CjOYh0B4nbbjk")
 
 # ===== آیدی ادمین‌های اصلی (از env) =====
 ADMIN_IDS_STR = os.getenv("ADMIN_IDS", "1085150385")

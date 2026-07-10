@@ -17,8 +17,31 @@ if not os.path.exists(DOWNLOAD_DIR):
 
 logging.basicConfig(level=logging.INFO)
 
-# ===== کپشن ثابت =====
-FIXED_CAPTION = "🤍Downloaded by @iBBDownloaderBot"
+# ===================================================
+# 📝 همه پیام‌های ربات - اینجا شخصی‌سازی کن!
+# ===================================================
+MESSAGES = {
+    "start": """موزیک، ویدئو، پست، ریلز، شورت و استوری های مدنظر خود را از تمام پلتفرم های زیر دانلود کنید.
+
+📸 Instagram
+🐦 X (Twitter)
+📱 TikTok
+📌 Pinterest
+📷 Snapchat
+🌐 Facebook
+🎧 SoundCloud
+💬 Threads
+🔗 Reddit
+🎥 Likee
+
+لینک مدنظر خود را جهت دانلود بفرستید.""",
+    "downloading": "⏳ دانلود...",
+    "invalid_link": "❌ لطفاً یه لینک معتبر اینستاگرام بفرست.",
+    "download_failed": "دانلود نشد. پست ممکنه خصوصی یا حذف شده باشه.",
+    "send_error": "خطا در ارسال فایل: {error}",
+    "caption": "🤍Downloaded by @iBBDownloaderBot",
+}
+# ===================================================
 
 def download_image_direct(shortcode):
     try:
@@ -49,7 +72,6 @@ def download_instagram_post(url):
         shortcode = shortcode_match.group(1)
         logging.info(f"Shortcode: {shortcode}")
 
-        # ===== yt-dlp =====
         ydl_opts = {
             'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
             'quiet': True,
@@ -81,13 +103,12 @@ def download_instagram_post(url):
         except Exception as e:
             logging.warning(f"yt-dlp failed: {e}")
 
-        # ===== دانلود مستقیم عکس =====
         logging.info("Trying direct image download...")
         img_file = download_image_direct(shortcode)
         if img_file:
             return [img_file], None
 
-        return None, "دانلود نشد. پست ممکنه خصوصی یا حذف شده باشه."
+        return None, MESSAGES["download_failed"]
 
     except Exception as e:
         logging.error(f"Error: {e}")
@@ -106,33 +127,34 @@ def webhook():
                 logging.info(f"Message: {text}")
                 
                 if text.startswith('/start'):
-                    bot.send_message(chat_id, "سلام! لینک اینستاگرام رو بفرست.")
+                    bot.send_message(chat_id, MESSAGES["start"])
                     return 'OK', 200
                 
                 if 'instagram.com' in text:
-                    msg = bot.send_message(chat_id, "⏳ Downloading...")
-                    files, _ = download_instagram_post(text)
+                    msg = bot.send_message(chat_id, MESSAGES["downloading"])
+                    files, error = download_instagram_post(text)
                     
                     if not files:
-                        bot.edit_message_text(f"❌ {_}", chat_id, msg.message_id)
+                        bot.edit_message_text(f"❌ {error}", chat_id, msg.message_id)
                         return 'OK', 200
                     
                     for f in files:
                         try:
                             with open(f, 'rb') as media:
-                                # ===== همه فایل‌ها با کپشن ثابت =====
                                 if f.endswith('.mp4'):
-                                    bot.send_video(chat_id, media, caption=FIXED_CAPTION)
+                                    bot.send_video(chat_id, media, caption=MESSAGES["caption"])
                                 else:
-                                    bot.send_photo(chat_id, media, caption=FIXED_CAPTION)
+                                    bot.send_photo(chat_id, media, caption=MESSAGES["caption"])
                             os.remove(f)
                         except Exception as e:
                             logging.error(f"خطا در ارسال: {e}")
-                            bot.send_message(chat_id, f"خطا در ارسال فایل: {e}")
+                            bot.send_message(chat_id, MESSAGES["send_error"].format(error=str(e)))
                     
-                    bot.edit_message_text("✅ Done!", chat_id, msg.message_id)
+                    # ===== حذف پیام موفقیت =====
+                    # دیگه پیام "✅ Done!" ارسال نمیشه
+                    # فقط فایل ارسال میشه
                 else:
-                    bot.send_message(chat_id, "❌ Send Instagram link.")
+                    bot.send_message(chat_id, MESSAGES["invalid_link"])
             
             return 'OK', 200
     except Exception as e:
@@ -149,7 +171,7 @@ def set_webhook():
 
 @app.route('/', methods=['GET'])
 def home():
-    return 'Bot is running!', 200
+    return 'ربات در حال کار است!', 200
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

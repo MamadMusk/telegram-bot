@@ -6,6 +6,9 @@ from config import TOKEN
 from handlers import handle_message, handle_callback_query
 from database import init_db
 
+# ===== راه‌اندازی دیتابیس (قبل از هر چیز) =====
+init_db()
+
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 

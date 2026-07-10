@@ -1,5 +1,8 @@
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton
 
+# ===================================================
+# 📝 همه پیام‌های ربات
+# ===================================================
 MESSAGES = {
     "start": """🎬 به ربات دانلودر خوش اومدی!
 
@@ -15,13 +18,8 @@ MESSAGES = {
     "send_error": "❌ خطا در ارسال فایل: {error}",
     "caption": "🤍Downloaded by @iBBDownloaderBot",
     
-    # ===== دکمه‌های ادمین (بدون پیام جداگانه) =====
-    "admin_stats": "📊 آمار ربات",
-    "admin_broadcast": "📨 ارسال همگانی",
-    "admin_force_sub": "🔒 قفل اسپانسر",
-    "admin_admins": "📋 مدیریت ادمین‌ها",
-    "admin_settings": "⚙️ تنظیمات ربات",
-    "admin_back": "🔙 بازگشت",
+    # ===== پنل ادمین =====
+    "admin_welcome": "🛠 به پنل مدیریت خوش آمدید.\nلطفاً یکی از گزینه‌ها را انتخاب کنید:",
     
     # ===== آمار =====
     "stats_text": """📊 **آمار ربات**
@@ -48,8 +46,6 @@ MESSAGES = {
 
 📌 برای **افزودن** کانال جدید، روی دکمه زیر کلیک کنید.
 📌 برای **حذف** کانال، روی دکمه مربوطه کلیک کنید.""",
-    "force_sub_add_channel": "➕ افزودن کانال جدید",
-    "force_sub_remove_channel": "❌ حذف کانال",
     "force_sub_add_prompt": "📝 آیدی کانال جدید را با @ وارد کنید:\nمثال: @MyChannel",
     "force_sub_added": "✅ کانال {channel} با موفقیت اضافه شد.",
     "force_sub_removed": "❌ کانال {channel} با موفقیت حذف شد.",
@@ -82,9 +78,7 @@ _________________
 📌 **کانال‌های اجباری:** {channels}
 📌 **سقف دانلود روزانه:** {daily_quota} 
 📌 **حداکثر حجم فایل:** {max_file_size} MB
-📌 **وضعیت ربات:** {is_active}
-
-برای تغییر هر تنظیم، روی دکمه مربوطه کلیک کنید.""",
+📌 **وضعیت ربات:** {is_active}""",
     "settings_updated": "✅ تنظیمات با موفقیت به‌روزرسانی شد.",
     "settings_quota_prompt": "📊 سقف دانلود روزانه را به عدد وارد کنید (0 = نامحدود):",
     "settings_size_prompt": "📦 حداکثر حجم فایل را به مگابایت وارد کنید:",
@@ -97,17 +91,15 @@ def get_admin_keyboard():
     """دکمه‌های پنل ادمین (دکمه‌های شیشه‌ای اصلی)"""
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     
-    btn_stats = KeyboardButton(MESSAGES["admin_stats"])
-    btn_broadcast = KeyboardButton(MESSAGES["admin_broadcast"])
-    btn_force_sub = KeyboardButton(MESSAGES["admin_force_sub"])
-    btn_admins = KeyboardButton(MESSAGES["admin_admins"])
-    btn_settings = KeyboardButton(MESSAGES["admin_settings"])
-    btn_back = KeyboardButton(MESSAGES["admin_back"])
+    btn_stats = KeyboardButton("📊 آمار ربات")
+    btn_broadcast = KeyboardButton("📨 ارسال همگانی")
+    btn_force_sub = KeyboardButton("🔒 قفل اسپانسر")
+    btn_admins = KeyboardButton("📋 مدیریت ادمین‌ها")
+    btn_settings = KeyboardButton("⚙️ تنظیمات ربات")
     
     keyboard.add(btn_stats, btn_broadcast)
     keyboard.add(btn_force_sub, btn_admins)
     keyboard.add(btn_settings)
-    keyboard.add(btn_back)
     
     return keyboard
 
@@ -116,21 +108,13 @@ def get_user_keyboard():
     return ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
 
 # ===================================================
-# 🔐 دکمه‌های اینلاین (Inline Keyboard)
+# 🔐 دکمه‌های شیشه‌ای (Inline Keyboard)
 # ===================================================
 def get_stats_refresh_keyboard():
-    """دکمه بروزرسانی آمار"""
-    keyboard = InlineKeyboardMarkup(row_width=1)
-    btn_refresh = InlineKeyboardButton("🔄 بروزرسانی", callback_data="stats_refresh")
+    """دکمه شیشه‌ای برای بروزرسانی آمار"""
+    keyboard = InlineKeyboardMarkup()
+    btn_refresh = InlineKeyboardButton("🔄 بروزرسانی", callback_data="refresh_stats")
     keyboard.add(btn_refresh)
-    return keyboard
-
-def get_confirm_keyboard():
-    """دکمه‌های تأیید یا لغو برای ارسال همگانی"""
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    btn_confirm = InlineKeyboardButton("✅ تأیید و ارسال", callback_data="broadcast_confirm")
-    btn_cancel = InlineKeyboardButton("❌ لغو", callback_data="broadcast_cancel")
-    keyboard.add(btn_confirm, btn_cancel)
     return keyboard
 
 def get_force_sub_keyboard(channels):
@@ -143,9 +127,18 @@ def get_force_sub_keyboard(channels):
     keyboard.add(btn_verify)
     return keyboard
 
+def get_confirm_keyboard():
+    """دکمه‌های تأیید یا لغو برای ارسال همگانی"""
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    btn_confirm = InlineKeyboardButton("✅ تأیید و ارسال", callback_data="broadcast_confirm")
+    btn_cancel = InlineKeyboardButton("❌ لغو", callback_data="broadcast_cancel")
+    keyboard.add(btn_confirm, btn_cancel)
+    return keyboard
+
 def get_admin_list_inline_keyboard(admins):
-    """دکمه‌های مدیریت ادمین‌ها"""
+    """دکمه‌های مدیریت ادمین‌ها با لیست و گزینه‌های عملیات"""
     keyboard = InlineKeyboardMarkup(row_width=1)
+    
     for admin in admins:
         user_id = admin['user_id']
         name = admin.get('first_name', 'Unknown')
@@ -153,13 +146,31 @@ def get_admin_list_inline_keyboard(admins):
         label = f"👤 {name} (@{username}) - {admin['role']}"
         btn_remove = InlineKeyboardButton(f"❌ {label}", callback_data=f"admin_remove_{user_id}")
         keyboard.add(btn_remove)
+    
     btn_add = InlineKeyboardButton("➕ افزودن ادمین", callback_data="admin_add")
     btn_back = InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")
     keyboard.add(btn_add)
     keyboard.add(btn_back)
+    
+    return keyboard
+
+def get_force_sub_inline_keyboard(channels):
+    """دکمه‌های مدیریت قفل اسپانسر"""
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    
+    for channel in channels:
+        btn_remove = InlineKeyboardButton(f"❌ حذف {channel}", callback_data=f"force_sub_remove_{channel}")
+        keyboard.add(btn_remove)
+    
+    btn_add = InlineKeyboardButton("➕ افزودن کانال", callback_data="force_sub_add")
+    btn_back = InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")
+    keyboard.add(btn_add)
+    keyboard.add(btn_back)
+    
     return keyboard
 
 def get_settings_inline_keyboard():
+    """دکمه‌های تنظیمات ربات"""
     keyboard = InlineKeyboardMarkup(row_width=2)
     btn_quota = InlineKeyboardButton("📊 سقف دانلود", callback_data="setting_quota")
     btn_size = InlineKeyboardButton("📦 حجم فایل", callback_data="setting_size")
@@ -170,14 +181,10 @@ def get_settings_inline_keyboard():
     keyboard.add(btn_back)
     return keyboard
 
-def get_force_sub_inline_keyboard(channels):
-    keyboard = InlineKeyboardMarkup(row_width=1)
-    for channel in channels:
-        btn_remove = InlineKeyboardButton(f"❌ حذف {channel}", callback_data=f"force_sub_remove_{channel}")
-        keyboard.add(btn_remove)
-    btn_add = InlineKeyboardButton("➕ افزودن کانال", callback_data="force_sub_add")
+def get_back_keyboard():
+    """دکمه بازگشت ساده"""
+    keyboard = InlineKeyboardMarkup()
     btn_back = InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")
-    keyboard.add(btn_add)
     keyboard.add(btn_back)
     return keyboard
 

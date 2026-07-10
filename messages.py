@@ -1,7 +1,7 @@
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton
 
 # ===================================================
-# 📝 همه پیام‌های ربات - اینجا رو ادیت کن!
+# 📝 همه پیام‌های ربات
 # ===================================================
 MESSAGES = {
     "start": """🎬 به ربات دانلودر خوش اومدی!
@@ -18,9 +18,11 @@ MESSAGES = {
     "send_error": "❌ خطا در ارسال فایل: {error}",
     "caption": "🤍Downloaded by @iBBDownloaderBot",
     
-    # ===== پیام‌های پنل ادمین =====
+    # ===== پنل ادمین =====
     "admin_panel": "🛠 پنل مدیریت",
     "admin_welcome": "🛠 به پنل مدیریت خوش آمدید.\nلطفاً یکی از گزینه‌ها را انتخاب کنید:",
+    
+    # ===== آمار =====
     "stats_title": "📊 آمار ربات",
     "stats_text": """📊 **آمار ربات**
 
@@ -30,6 +32,7 @@ MESSAGES = {
 📅 **ماه گذشته:** {month}
 📥 **کل دانلودها:** {downloads}""",
     
+    # ===== ارسال همگانی =====
     "broadcast_title": "📨 ارسال همگانی",
     "broadcast_prompt": "📝 پیام مورد نظر برای ارسال به تمام کاربران را بنویسید:",
     "broadcast_preview": "📨 **پیش‌نمایش پیام همگانی**\n\n{message}\n\n👥 تعداد گیرندگان: {count} نفر\n\nآیا از ارسال مطمئن هستید؟",
@@ -38,14 +41,18 @@ MESSAGES = {
     "broadcast_failed": "❌ خطا در ارسال همگانی: {error}",
     "broadcast_empty": "❌ پیام نمی‌تواند خالی باشد.",
     
+    # ===== قفل اسپانسر =====
     "force_sub_title": "🔒 قفل اسپانسر",
     "force_sub_prompt": """🔒 **تنظیمات قفل اسپانسر**
 
 کانال‌های اجباری فعلی:
 {channels}
 
-برای اضافه کردن کانال جدید، آیدی آن را با @ وارد کنید.
-برای حذف کانال، دستور /remove_channel @channel را بفرستید.""",
+📌 برای **افزودن** کانال جدید، دستور زیر را بفرستید:
+`/add_channel @channel`
+
+📌 برای **حذف** کانال، دستور زیر را بفرستید:
+`/remove_channel @channel`""",
     "force_sub_added": "✅ کانال {channel} با موفقیت اضافه شد.",
     "force_sub_removed": "❌ کانال {channel} با موفقیت حذف شد.",
     "force_sub_not_found": "❌ کانال {channel} در لیست پیدا نشد.",
@@ -56,72 +63,106 @@ MESSAGES = {
 
 پس از عضویت، دکمه زیر را بزنید.""",
     "force_sub_verified": "✅ عضویت شما تأیید شد! حالا می‌توانید از ربات استفاده کنید.",
+    
+    # ===== مدیریت ادمین‌ها =====
+    "admin_management": "📋 مدیریت ادمین‌ها",
+    "admin_list": """📋 **لیست ادمین‌ها**
+
+{admins}
+_________________
+🔹 **نقش‌ها:**
+• super - دسترسی کامل
+• moderator - مدیریت کاربران
+• viewer - فقط مشاهده""",
+    "admin_add_prompt": "👤 آیدی عددی کاربر جدید را برای افزودن به عنوان ادمین وارد کنید:",
+    "admin_add_success": "✅ کاربر با موفقیت به عنوان ادمین اضافه شد.\nنقش: {role}",
+    "admin_remove_prompt": "👤 آیدی عددی ادمین مورد نظر برای حذف را وارد کنید:",
+    "admin_remove_success": "❌ کاربر از لیست ادمین‌ها حذف شد.",
+    "admin_not_found": "❌ کاربر پیدا نشد.",
+    "admin_invalid_id": "❌ آیدی وارد شده معتبر نیست.",
+    "admin_cant_remove_self": "❌ نمی‌توانید خودتان را حذف کنید!",
+    
+    # ===== تنظیمات ربات =====
+    "settings_title": "⚙️ تنظیمات ربات",
+    "settings_list": """⚙️ **تنظیمات ربات**
+
+📌 **کانال‌های اجباری:** {channels}
+📌 **سقف دانلود روزانه:** {daily_quota} 
+📌 **حداکثر حجم فایل:** {max_file_size} MB
+📌 **وضعیت ربات:** {is_active}
+
+برای تغییر هر تنظیم، روی دکمه مربوطه کلیک کنید.""",
+    "settings_updated": "✅ تنظیمات با موفقیت به‌روزرسانی شد.",
 }
 
 # ===================================================
 # ⌨️ دکمه‌های شیشه‌ای (فقط برای ادمین)
 # ===================================================
 def get_admin_keyboard():
-    """دکمه‌های پنل ادمین (فقط برای ادمین‌ها)"""
+    """دکمه‌های پنل ادمین"""
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     
     btn_stats = KeyboardButton("📊 آمار ربات")
     btn_broadcast = KeyboardButton("📨 ارسال همگانی")
     btn_force_sub = KeyboardButton("🔒 قفل اسپانسر")
+    btn_admins = KeyboardButton("📋 مدیریت ادمین‌ها")
+    btn_settings = KeyboardButton("⚙️ تنظیمات ربات")
     btn_back = KeyboardButton("🔙 بازگشت")
     
     keyboard.add(btn_stats, btn_broadcast)
-    keyboard.add(btn_force_sub)
+    keyboard.add(btn_force_sub, btn_admins)
+    keyboard.add(btn_settings)
     keyboard.add(btn_back)
     
     return keyboard
 
 def get_user_keyboard():
-    """دکمه‌های کاربر عادی (هیچ دکمه‌ای!)"""
-    # کاربر عادی هیچ دکمه‌ای نمی‌بینه
+    """کاربر عادی هیچ دکمه‌ای نمی‌بینه"""
     return ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
 
 # ===================================================
 # 🔐 دکمه‌های اینلاین (Inline Keyboard)
 # ===================================================
 def get_admin_inline_keyboard():
-    """دکمه‌های اینلاین پنل ادمین"""
     keyboard = InlineKeyboardMarkup(row_width=2)
-    
     btn_stats = InlineKeyboardButton("📊 آمار", callback_data="admin_stats")
     btn_broadcast = InlineKeyboardButton("📨 ارسال همگانی", callback_data="admin_broadcast")
     btn_force_sub = InlineKeyboardButton("🔒 قفل اسپانسر", callback_data="admin_force_sub")
+    btn_admins = InlineKeyboardButton("📋 ادمین‌ها", callback_data="admin_admins")
+    btn_settings = InlineKeyboardButton("⚙️ تنظیمات", callback_data="admin_settings")
     btn_close = InlineKeyboardButton("❌ بستن", callback_data="admin_close")
-    
     keyboard.add(btn_stats, btn_broadcast)
-    keyboard.add(btn_force_sub)
+    keyboard.add(btn_force_sub, btn_admins)
+    keyboard.add(btn_settings)
     keyboard.add(btn_close)
-    
     return keyboard
 
 def get_force_sub_keyboard(channels):
-    """دکمه‌های تأیید عضویت در کانال"""
     keyboard = InlineKeyboardMarkup(row_width=1)
-    
     for channel in channels:
         btn = InlineKeyboardButton(f"📢 عضویت در {channel}", url=f"https://t.me/{channel.replace('@', '')}")
         keyboard.add(btn)
-    
     btn_verify = InlineKeyboardButton("✅ تأیید عضویت", callback_data="force_sub_verify")
     keyboard.add(btn_verify)
-    
     return keyboard
 
 def get_confirm_keyboard():
-    """دکمه‌های تأیید یا لغو برای ارسال همگانی"""
     keyboard = InlineKeyboardMarkup(row_width=2)
     btn_confirm = InlineKeyboardButton("✅ تأیید و ارسال", callback_data="broadcast_confirm")
     btn_cancel = InlineKeyboardButton("❌ لغو", callback_data="broadcast_cancel")
     keyboard.add(btn_confirm, btn_cancel)
     return keyboard
 
+def get_admin_actions_keyboard(user_id):
+    """دکمه‌های عملیات روی یک ادمین خاص"""
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    btn_remove = InlineKeyboardButton(f"❌ حذف ادمین {user_id}", callback_data=f"admin_remove_{user_id}")
+    btn_back = InlineKeyboardButton("🔙 بازگشت", callback_data="admin_admins")
+    keyboard.add(btn_remove, btn_back)
+    return keyboard
+
 # ===================================================
-# 📋 لیست کامندها (برای منوی ربات)
+# 📋 کامندها
 # ===================================================
 COMMANDS = [
     BotCommand("start", "شروع و نمایش راهنما"),

@@ -265,7 +265,7 @@ def process_setting_change(message, key, prompt_message):
         bot.register_next_step_handler(msg, lambda m: process_setting_change(m, key, prompt_message))
 
 # ===================================================
-# 📞 پردازش Callback
+# 📞 پردازش Callback (دکمه‌های شیشه‌ای)
 # ===================================================
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):
@@ -273,12 +273,14 @@ def handle_callback(call):
     chat_id = call.message.chat.id
     message_id = call.message.message_id
     
+    logging.info(f"📞 Callback received: {call.data} from {user_id}")
+    
     if not is_admin(user_id):
         bot.answer_callback_query(call.id, "⛔ شما دسترسی ادمین ندارید!", show_alert=True)
         return
     
     data = call.data
-    bot.answer_callback_query(call.id)
+    bot.answer_callback_query(call.id)  # پاسخ اولیه
     
     # ===== بروزرسانی آمار =====
     if data == "refresh_stats":
@@ -403,10 +405,11 @@ def webhook():
     try:
         if request.headers.get('content-type') == 'application/json':
             json_string = request.get_data().decode('utf-8')
-            logging.info(f"📩 Webhook received: {json_string[:200]}...")
+            logging.info(f"📩 Webhook received")
             
             update = telebot.types.Update.de_json(json_string)
             
+            # ===== پردازش با خود bot =====
             if update.message:
                 chat_id = update.message.chat.id
                 user_id = update.message.from_user.id
@@ -486,6 +489,11 @@ def webhook():
                 else:
                     if not is_admin(user_id):
                         bot.send_message(chat_id, MESSAGES["invalid_link"])
+            
+            # ===== پردازش Callback Query =====
+            elif update.callback_query:
+                logging.info(f"📞 Callback received: {update.callback_query.data}")
+                bot.process_new_updates([update])
             
             return 'OK', 200
         else:

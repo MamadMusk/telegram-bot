@@ -10,7 +10,7 @@ import threading
 import json
 import logging
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from config import DB_PATH, ADMIN_IDS
@@ -25,6 +25,7 @@ def _now_iso() -> str:
 
 @contextmanager
 def get_conn() -> Iterator[sqlite3.Connection]:
+    os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=30, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
@@ -37,11 +38,13 @@ def get_conn() -> Iterator[sqlite3.Connection]:
 
 
 def init_db() -> None:
+    """ایجاد جداول با پشتیبانی از زبان، تاریخ انقضا و ..."""
     os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
 
     with get_conn() as conn:
         c = conn.cursor()
 
+        # ─── Users با ستون زبان ───
         c.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id            INTEGER PRIMARY KEY,
@@ -51,10 +54,12 @@ def init_db() -> None:
                 joined_date   TEXT DEFAULT (datetime('now')),
                 is_banned     INTEGER DEFAULT 0,
                 is_premium    INTEGER DEFAULT 0,
-                last_seen     TEXT
+                last_seen     TEXT,
+                language      TEXT DEFAULT 'fa'
             )
         """)
 
+        # ─── Downloads ───
         c.execute("""
             CREATE TABLE IF NOT EXISTS downloads (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,6 +73,7 @@ def init_db() -> None:
             )
         """)
 
+        # ─── Settings (key-value) ───
         c.execute("""
             CREATE TABLE IF NOT EXISTS settings (
                 key   TEXT PRIMARY KEY,
@@ -75,6 +81,7 @@ def init_db() -> None:
             )
         """)
 
+        # ─── Daily quota (rate limiting) ───
         c.execute("""
             CREATE TABLE IF NOT EXISTS daily_quota (
                 user_id      INTEGER NOT NULL,
@@ -85,15 +92,18 @@ def init_db() -> None:
             )
         """)
 
+        # ─── Admins با تاریخ انقضا ───
         c.execute("""
             CREATE TABLE IF NOT EXISTS admins (
-                user_id    INTEGER PRIMARY KEY,
-                role       TEXT DEFAULT 'viewer',
-                added_at   TEXT DEFAULT (datetime('now')),
-                permissions TEXT DEFAULT '{}'
+                user_id      INTEGER PRIMARY KEY,
+                role         TEXT DEFAULT 'viewer',
+                added_at     TEXT DEFAULT (datetime('now')),
+                permissions  TEXT DEFAULT '{}',
+                expire_date  TEXT
             )
         """)
 
+        # ─── Default settings ───
         defaults = [
             ("welcome_message", "👋 سلام! به ربات دانلود اینستاگرام خوش آمدید."),
             ("is_active", "True"),
@@ -103,12 +113,14 @@ def init_db() -> None:
             ("force_channels", ""),
             ("rate_limit_enabled", "False"),
             ("rate_limit_seconds", "30"),
+            ("admin_report_time", "08:00"),  # ساعت ارسال گزارش روزانه
         ]
         c.executemany("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", defaults)
 
+        # ─── Seed admins from ADMIN_IDS ───
         for admin_id in ADMIN_IDS:
             c.execute(
-                "INSERT OR IGNORE INTO admins (user_id, role, permissions) VALUES (?, 'owner', ?)",
+                "INSERT OR IGNORE INTO admins (user_id, role, permissions, expire_date) VALUES (?, 'owner', ?, NULL)",
                 (admin_id, json.dumps({
                     "can_view_stats": True,
                     "can_send_broadcast": True,
@@ -123,50 +135,54 @@ def init_db() -> None:
         c.execute("CREATE INDEX IF NOT EXISTS idx_downloads_date ON downloads(download_date DESC);")
         c.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);")
 
-    print("✅ Database initialized at", DB_PATH)
+    print(f"✅ Database initialized at {DB_PATH}")
 
 
 # ============================================================
-#  Users
+#  Users (با پشتیبانی از زبان)
 # ============================================================
 def add_user(user_id: int, username: Optional[str], first_name: Optional[str],
-             last_name: Optional[str]) -> None:
+             last_name: Optional[str], language: str = "fa") -> None:
     with _write_lock, get_conn() as conn:
         conn.execute(
             """
-            INSERT INTO users (id, username, first_name, last_name, last_seen)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO users (id, username, first_name, last_name, last_seen, language)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 username   = excluded.username,
                 first_name = excluded.first_name,
                 last_name  = excluded.last_name,
                 last_seen  = excluded.last_seen
             """,
-            (user_id, username, first_name, last_name, _now_iso()),
+            (user_id, username, first_name, last_name, _now_iso(), language),
         )
 
+def get_user_language(user_id: int) -> str:
+    with get_conn() as conn:
+        row = conn.execute("SELECT language FROM users WHERE id = ?", (user_id,)).fetchone()
+        return row["language"] if row else "fa"
+
+def set_user_language(user_id: int, language: str) -> None:
+    with _write_lock, get_conn() as conn:
+        conn.execute("UPDATE users SET language = ? WHERE id = ?", (language, user_id))
 
 def is_banned(user_id: int) -> bool:
     with get_conn() as conn:
         row = conn.execute("SELECT is_banned FROM users WHERE id = ?", (user_id,)).fetchone()
         return bool(row and row["is_banned"])
 
-
 def ban_user(user_id: int) -> None:
     with _write_lock, get_conn() as conn:
         conn.execute("UPDATE users SET is_banned = 1 WHERE id = ?", (user_id,))
-
 
 def unban_user(user_id: int) -> None:
     with _write_lock, get_conn() as conn:
         conn.execute("UPDATE users SET is_banned = 0 WHERE id = ?", (user_id,))
 
-
 def get_user(user_id: int) -> Optional[Dict[str, Any]]:
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         return dict(row) if row else None
-
 
 def get_users_paginated(
     page: int = 1, size: int = 50, search: str = ""
@@ -200,7 +216,6 @@ def add_download(user_id: int, post_url: str, platform: str = "instagram",
             (user_id, post_url, platform, status, file_size_kb),
         )
 
-
 def get_recent_downloads(limit: int = 10) -> List[Dict[str, Any]]:
     with get_conn() as conn:
         rows = conn.execute(
@@ -214,7 +229,6 @@ def get_recent_downloads(limit: int = 10) -> List[Dict[str, Any]]:
             (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
-
 
 def get_downloads_paginated(
     page: int = 1, size: int = 50
@@ -234,7 +248,6 @@ def get_downloads_paginated(
         ).fetchall()
         return [dict(r) for r in rows], total
 
-
 def increment_download(user_id: int) -> None:
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     with _write_lock, get_conn() as conn:
@@ -251,7 +264,6 @@ def increment_download(user_id: int) -> None:
             (user_id, today),
         )
 
-
 def get_total_downloads() -> int:
     with get_conn() as conn:
         row = conn.execute("SELECT COUNT(*) FROM downloads").fetchone()
@@ -266,11 +278,9 @@ def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
         row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
         return row["value"] if row else default
 
-
 def set_setting(key: str, value: str) -> None:
     with _write_lock, get_conn() as conn:
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
-
 
 def get_all_settings() -> Dict[str, str]:
     with get_conn() as conn:
@@ -284,7 +294,6 @@ def get_all_settings() -> Dict[str, str]:
 def _today_str() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-
 def get_quota(user_id: int) -> int:
     today = _today_str()
     with get_conn() as conn:
@@ -293,7 +302,6 @@ def get_quota(user_id: int) -> int:
             (user_id, today),
         ).fetchone()
         return row["count"] if row else 0
-
 
 def increment_quota(user_id: int) -> int:
     today = _today_str()
@@ -311,7 +319,6 @@ def increment_quota(user_id: int) -> int:
             (user_id, today),
         ).fetchone()
         return row["count"] if row else 1
-
 
 def check_quota(user_id: int) -> Tuple[bool, int, int]:
     limit_str = get_setting("daily_quota", "10")
@@ -349,7 +356,6 @@ def get_stats() -> Dict[str, int]:
             "active_users_7d": active_users_7d,
         }
 
-
 def get_daily_download_series(days: int = 30) -> List[Dict[str, Any]]:
     with get_conn() as conn:
         rows = conn.execute(
@@ -366,7 +372,7 @@ def get_daily_download_series(days: int = 30) -> List[Dict[str, Any]]:
 
 
 # ============================================================
-#  Admins (RBAC) - اصلاح شده با لاگ کامل
+#  Admins (RBAC با تاریخ انقضا)
 # ============================================================
 def is_admin(user_id: int) -> bool:
     if user_id in ADMIN_IDS:
@@ -375,7 +381,6 @@ def is_admin(user_id: int) -> bool:
         row = conn.execute("SELECT 1 FROM admins WHERE user_id = ?", (user_id,)).fetchone()
         return row is not None
 
-
 def get_admin_role(user_id: int) -> Optional[str]:
     if user_id in ADMIN_IDS:
         return "owner"
@@ -383,9 +388,32 @@ def get_admin_role(user_id: int) -> Optional[str]:
         row = conn.execute("SELECT role FROM admins WHERE user_id = ?", (user_id,)).fetchone()
         return row["role"] if row else None
 
+def get_admin_expire_date(user_id: int) -> Optional[str]:
+    if user_id in ADMIN_IDS:
+        return None  # owner هیچوقت منقضی نمیشه
+    with get_conn() as conn:
+        row = conn.execute("SELECT expire_date FROM admins WHERE user_id = ?", (user_id,)).fetchone()
+        return row["expire_date"] if row else None
+
+def set_admin_expire_date(user_id: int, expire_date: Optional[str]) -> None:
+    if user_id in ADMIN_IDS:
+        return
+    with _write_lock, get_conn() as conn:
+        conn.execute("UPDATE admins SET expire_date = ? WHERE user_id = ?", (expire_date, user_id))
+
+def is_admin_expired(user_id: int) -> bool:
+    if user_id in ADMIN_IDS:
+        return False
+    expire_date = get_admin_expire_date(user_id)
+    if not expire_date:
+        return False
+    try:
+        expire = datetime.fromisoformat(expire_date)
+        return datetime.now(timezone.utc) > expire
+    except:
+        return False
 
 def get_admin_permissions(user_id: int) -> Dict[str, bool]:
-    """دریافت دسترسی‌های ادمین با لاگ کامل"""
     if user_id in ADMIN_IDS:
         return {
             "can_view_stats": True,
@@ -395,18 +423,23 @@ def get_admin_permissions(user_id: int) -> Dict[str, bool]:
             "can_manage_admins": True,
             "can_remove_owner": False
         }
-    
+    # اگر منقضی شده باشه، همه دسترسی‌ها رو false برمی‌گردونیم
+    if is_admin_expired(user_id):
+        return {
+            "can_view_stats": False,
+            "can_send_broadcast": False,
+            "can_manage_force_sub": False,
+            "can_manage_settings": False,
+            "can_manage_admins": False,
+            "can_remove_owner": False
+        }
     with get_conn() as conn:
         row = conn.execute(
             "SELECT permissions FROM admins WHERE user_id = ?", (user_id,)
         ).fetchone()
-        
         if row and row["permissions"]:
             try:
                 stored_perms = json.loads(row["permissions"])
-                logger.info(f"📖 Loaded permissions from DB for {user_id}: {stored_perms}")
-                
-                # دیکشنری پیش‌فرض
                 default_perms = {
                     "can_view_stats": True,
                     "can_send_broadcast": False,
@@ -415,14 +448,10 @@ def get_admin_permissions(user_id: int) -> Dict[str, bool]:
                     "can_manage_admins": False,
                     "can_remove_owner": False
                 }
-                # ادغام با مقادیر ذخیره شده
                 default_perms.update(stored_perms)
-                logger.info(f"📖 Merged permissions for {user_id}: {default_perms}")
                 return default_perms
-            except json.JSONDecodeError as e:
-                logger.error(f"❌ JSON decode error for {user_id}: {e}")
-    
-    # اگر هیچ مقداری نبود، پیش‌فرض برگردان
+            except json.JSONDecodeError:
+                pass
     default = {
         "can_view_stats": True,
         "can_send_broadcast": False,
@@ -431,16 +460,11 @@ def get_admin_permissions(user_id: int) -> Dict[str, bool]:
         "can_manage_admins": False,
         "can_remove_owner": False
     }
-    logger.info(f"📖 Returning default permissions for {user_id}: {default}")
     return default
 
-
 def update_admin_permissions(user_id: int, permissions: Dict[str, bool]) -> bool:
-    """به‌روزرسانی دسترسی‌های ادمین با لاگ کامل"""
     if user_id in ADMIN_IDS:
-        logger.warning(f"⚠️ Cannot update permissions for owner {user_id}")
         return False
-    
     try:
         perms_json = json.dumps(permissions)
         with _write_lock, get_conn() as conn:
@@ -448,16 +472,13 @@ def update_admin_permissions(user_id: int, permissions: Dict[str, bool]) -> bool
                 "UPDATE admins SET permissions = ? WHERE user_id = ?",
                 (perms_json, user_id)
             )
-            rows_affected = cursor.rowcount
-            logger.info(f"📝 Updated permissions for {user_id}: {permissions}")
-            logger.info(f"📝 Rows affected: {rows_affected}")
-            return rows_affected > 0
+            return cursor.rowcount > 0
     except Exception as e:
-        logger.error(f"❌ Error updating permissions for {user_id}: {e}")
+        logger.error(f"Error updating permissions for {user_id}: {e}")
         return False
 
-
-def add_admin(user_id: int, role: str = "viewer", permissions: Optional[Dict[str, bool]] = None) -> None:
+def add_admin(user_id: int, role: str = "viewer", permissions: Optional[Dict[str, bool]] = None,
+              expire_date: Optional[str] = None) -> None:
     if permissions is None:
         permissions = {
             "can_view_stats": True,
@@ -469,25 +490,20 @@ def add_admin(user_id: int, role: str = "viewer", permissions: Optional[Dict[str
         }
     with _write_lock, get_conn() as conn:
         conn.execute(
-            "INSERT OR REPLACE INTO admins (user_id, role, permissions) VALUES (?, ?, ?)",
-            (user_id, role, json.dumps(permissions))
+            "INSERT OR REPLACE INTO admins (user_id, role, permissions, expire_date) VALUES (?, ?, ?, ?)",
+            (user_id, role, json.dumps(permissions), expire_date)
         )
-        logger.info(f"✅ Admin {user_id} added with permissions: {permissions}")
-
 
 def remove_admin(user_id: int) -> None:
     if user_id in ADMIN_IDS:
-        logger.warning(f"⚠️ Cannot remove owner {user_id}")
         return
     with _write_lock, get_conn() as conn:
         conn.execute("DELETE FROM admins WHERE user_id = ?", (user_id,))
-        logger.info(f"✅ Admin {user_id} removed")
-
 
 def get_all_admins() -> List[Dict[str, Any]]:
     with get_conn() as conn:
         rows = conn.execute("""
-            SELECT a.user_id, a.role, a.added_at, a.permissions,
+            SELECT a.user_id, a.role, a.added_at, a.permissions, a.expire_date,
                    u.username, u.first_name, u.last_name
             FROM admins a
             LEFT JOIN users u ON a.user_id = u.id
@@ -506,9 +522,9 @@ def get_all_admins() -> List[Dict[str, Any]]:
                     "can_manage_admins": True,
                     "can_remove_owner": False
                 })
+                d['expire_date'] = None
             result.append(d)
         return result
-
 
 def is_super_admin(user_id: int) -> bool:
     if user_id in ADMIN_IDS:
@@ -519,7 +535,7 @@ def is_super_admin(user_id: int) -> bool:
 
 
 # ============================================================
-#  Force Subscribe
+#  Force Subscribe (با ذخیره اسم کانال)
 # ============================================================
 def get_force_channels_list() -> List[str]:
     channels_str = get_setting("force_channels", "")
@@ -527,17 +543,14 @@ def get_force_channels_list() -> List[str]:
         return []
     return [ch.strip() for ch in channels_str.split(",") if ch.strip()]
 
-
 def set_force_channels_list(channels: List[str]) -> None:
     set_setting("force_channels", ",".join(channels))
-
 
 def add_force_channel(channel: str) -> None:
     channels = get_force_channels_list()
     if channel not in channels:
         channels.append(channel)
         set_force_channels_list(channels)
-
 
 def remove_force_channel(channel: str) -> bool:
     channels = get_force_channels_list()
@@ -555,10 +568,8 @@ def get_rate_limit_enabled() -> bool:
     val = get_setting("rate_limit_enabled", "False")
     return val.lower() == "true"
 
-
 def set_rate_limit_enabled(enabled: bool) -> None:
     set_setting("rate_limit_enabled", "True" if enabled else "False")
-
 
 def get_rate_limit_seconds() -> int:
     val = get_setting("rate_limit_seconds", "30")
@@ -566,7 +577,6 @@ def get_rate_limit_seconds() -> int:
         return int(val)
     except ValueError:
         return 30
-
 
 def set_rate_limit_seconds(seconds: int) -> None:
     set_setting("rate_limit_seconds", str(seconds))
@@ -583,18 +593,15 @@ def get_all_user_ids(include_banned: bool = False) -> List[int]:
             rows = conn.execute("SELECT id FROM users WHERE is_banned = 0").fetchall()
         return [r["id"] for r in rows]
 
-
 def get_all_users() -> List[Dict[str, Any]]:
     with get_conn() as conn:
         rows = conn.execute("SELECT * FROM users ORDER BY joined_date DESC").fetchall()
         return [dict(r) for r in rows]
 
-
 def get_user_count() -> int:
     with get_conn() as conn:
         row = conn.execute("SELECT COUNT(*) FROM users").fetchone()
         return row[0] if row else 0
-
 
 def get_all_users_count() -> int:
     return get_user_count()

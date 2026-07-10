@@ -1,10 +1,10 @@
 from flask import Flask, request
 import telebot
 import os
-import re
-import instaloader
+import yt_dlp
 import logging
 import time
+import re
 
 TOKEN = "8837695158:AAETrphGJh6wS1bmCXHOFB7-r4YPx0n8KR8"
 bot = telebot.TeleBot(TOKEN)
@@ -16,64 +16,37 @@ if not os.path.exists(DOWNLOAD_DIR):
 
 logging.basicConfig(level=logging.INFO)
 
-# ===== تنظیمات اینستاگرام =====
-INSTAGRAM_USERNAME = "YOUR_INSTAGRAM_USERNAME"  # یوزرنیم خودت رو بذار
-INSTAGRAM_PASSWORD = "YOUR_INSTAGRAM_PASSWORD"  # پسورد خودت رو بذار
-
-# ایجاد شیء instaloader با لاگین مستقیم
-loader = instaloader.Instaloader(
-    download_pictures=True,
-    download_videos=True,
-    download_video_thumbnails=False,
-    compress_json=False,
-    save_metadata=False,
-    post_metadata_txt_pattern='',
-    max_connection_attempts=3
-)
-
-# لاگین مستقیم با یوزرنیم و پسورد
-try:
-    loader.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
-    logging.info("✅ Instagram login successful!")
-except Exception as e:
-    logging.error(f"❌ Login failed: {e}")
-
-def download_instagram_post(url):
-    """
-    دانلود با instaloader با لاگین مستقیم
-    """
-    files = []
-    caption = ""
-    
-    shortcode_match = re.search(r'/(?:p|reel|tv|stories)/([^/?]+)', url)
-    if not shortcode_match:
-        return None, "لینک معتبر نیست."
-    shortcode = shortcode_match.group(1)
-    logging.info(f"Shortcode: {shortcode}")
-    
+def download_instagram(url):
     try:
-        # دریافت پست
-        post = instaloader.Post.from_shortcode(loader.context, shortcode)
-        
-        # دانلود پست
-        loader.download_post(post, target=shortcode)
-        
-        # پیدا کردن فایل‌های دانلود شده
-        for file in os.listdir('.'):
-            if file.startswith(shortcode) and (file.endswith('.jpg') or file.endswith('.png') or file.endswith('.mp4')):
-                files.append(os.path.join('.', file))
-        
-        caption = post.caption if post.caption else ""
-        
-        if files:
-            logging.info(f"✅ Downloaded {len(files)} files")
+        ydl_opts = {
+            'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
+            'quiet': True,
+            'no_warnings': False,
+            'format': 'best',  # بهترین کیفیت (عکس یا فیلم)
+            'ignoreerrors': True,
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            files = []
+            caption = ""
+            if info:
+                if 'entries' in info:
+                    for entry in info['entries']:
+                        if entry:
+                            fname = ydl.prepare_filename(entry)
+                            if os.path.exists(fname):
+                                files.append(fname)
+                    if info['entries'] and info['entries'][0]:
+                        caption = info['entries'][0].get('description', '')
+                else:
+                    fname = ydl.prepare_filename(info)
+                    if os.path.exists(fname):
+                        files.append(fname)
+                    caption = info.get('description', '')
             return files, caption
-        else:
-            return None, "هیچ فایلی دانلود نشد."
-            
     except Exception as e:
-        logging.error(f"Download error: {e}")
-        return None, f"خطا: {str(e)}"
+        logging.error(f"yt-dlp error: {e}")
+        return None, str(e)
 
 @app.route('/', methods=['POST'])
 def webhook():
@@ -81,42 +54,28 @@ def webhook():
         if request.headers.get('content-type') == 'application/json':
             json_string = request.get_data().decode('utf-8')
             update = telebot.types.Update.de_json(json_string)
-            
             if update.message:
                 chat_id = update.message.chat.id
                 text = update.message.text
-                logging.info(f"Message: {text}")
-                
-                if text and text.startswith('/start'):
+                if text.startswith('/start'):
                     bot.send_message(chat_id, "سلام! لینک اینستاگرام رو بفرست.")
                     return 'OK', 200
-                
-                if text and 'instagram.com' in text:
-                    msg = bot.send_message(chat_id, "⏳ در حال دانلود...")
-                    
-                    files, caption = download_instagram_post(text)
-                    
-                    if files is None:
-                        bot.edit_message_text(f"❌ {caption}", chat_id=chat_id, message_id=msg.message_id)
+                if 'instagram.com' in text:
+                    msg = bot.send_message(chat_id, "⏳ دانلود...")
+                    files, caption = download_instagram(text)
+                    if not files:
+                        bot.edit_message_text(f"❌ خطا: {caption}", chat_id, msg.message_id)
                         return 'OK', 200
-                    
                     for i, f in enumerate(files):
-                        try:
-                            if os.path.exists(f):
-                                if f.lower().endswith(('.mp4', '.mov', '.avi')):
-                                    with open(f, 'rb') as video:
-                                        bot.send_video(chat_id, video, caption=caption if i == 0 else None)
-                                else:
-                                    with open(f, 'rb') as photo:
-                                        bot.send_photo(chat_id, photo, caption=caption if i == 0 else None)
-                                os.remove(f)
-                        except Exception as e:
-                            logging.error(f"Error sending {f}: {e}")
-                    
-                    bot.edit_message_text("✅ دانلود کامل شد!", chat_id=chat_id, message_id=msg.message_id)
+                        with open(f, 'rb') as media:
+                            if f.lower().endswith(('.mp4', '.mov')):
+                                bot.send_video(chat_id, media, caption=caption if i == 0 else None)
+                            else:
+                                bot.send_photo(chat_id, media, caption=caption if i == 0 else None)
+                        os.remove(f)
+                    bot.edit_message_text("✅ دانلود کامل شد!", chat_id, msg.message_id)
                 else:
-                    bot.send_message(chat_id, "❌ لطفاً لینک اینستاگرام بفرست.")
-            
+                    bot.send_message(chat_id, "❌ لینک اینستاگرام بفرست.")
             return 'OK', 200
     except Exception as e:
         logging.error(f"Webhook error: {e}")
@@ -124,10 +83,9 @@ def webhook():
 
 @app.route('/setwebhook', methods=['GET'])
 def set_webhook():
-    webhook_url = 'https://telegram-bot-tkaz.onrender.com/'
     bot.remove_webhook()
     time.sleep(1)
-    bot.set_webhook(url=webhook_url)
+    bot.set_webhook(url='https://telegram-bot-tkaz.onrender.com/')
     return 'Webhook set!', 200
 
 @app.route('/', methods=['GET'])

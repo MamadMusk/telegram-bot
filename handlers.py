@@ -55,7 +55,9 @@ def check_user_subscription(bot, user_id):
 
 def has_permission(user_id, permission):
     perms = get_admin_permissions(user_id)
-    return perms.get(permission, False)
+    result = perms.get(permission, False)
+    logging.info(f"🔍 Permission check: {permission} for {user_id} = {result}")
+    return result
 
 def is_owner(user_id):
     return user_id == OWNER_ID
@@ -416,9 +418,12 @@ def handle_callback_query(bot, call, user_data):
         admin_id = int(parts[3])
         perm_key = parts[4]
         
-        # ===== ۱. اول جواب query رو بده =====
+        logging.info(f"🔄 Toggle permission: {perm_key} for admin {admin_id}")
+        
+        # ===== ۱. جواب query =====
         bot.answer_callback_query(call.id, "🔄 در حال تغییر...", show_alert=False)
         
+        # ===== ۲. بررسی دسترسی =====
         if not is_owner(user_id) and not has_permission(user_id, "can_manage_admins"):
             bot.answer_callback_query(call.id, MESSAGES["admin_no_permission"], show_alert=True)
             return
@@ -427,19 +432,25 @@ def handle_callback_query(bot, call, user_data):
             bot.answer_callback_query(call.id, MESSAGES["admin_cant_remove_owner"], show_alert=True)
             return
         
-        # ===== ۲. دریافت دسترسی‌های فعلی =====
+        # ===== ۳. دریافت و تغییر =====
         perms = get_admin_permissions(admin_id)
         old_value = perms.get(perm_key, False)
         new_value = not old_value
         perms[perm_key] = new_value
+        logging.info(f"🔄 Changing {perm_key} from {old_value} to {new_value}")
+        
+        # ===== ۴. ذخیره در دیتابیس =====
         update_admin_permissions(admin_id, perms)
         
-        # ===== ۳. دریافت اطلاعات ادمین =====
+        # ===== ۵. بررسی مجدد =====
+        check_perms = get_admin_permissions(admin_id)
+        logging.info(f"✅ After update: {check_perms}")
+        
+        # ===== ۶. ساخت متن جدید =====
         admin_info = get_user(admin_id)
         name = admin_info.get('first_name', 'Unknown') if admin_info else 'Unknown'
         role = get_admin_role(admin_id) or 'viewer'
         
-        # ===== ۴. ساخت متن جدید (کوتاه‌تر) =====
         text = f"""🔐 <b>دسترسی‌های ادمین</b>
 
 👤 {name} (ID: {admin_id})
@@ -452,10 +463,9 @@ def handle_callback_query(bot, call, user_data):
 • مدیریت ادمین‌ها: {"✅" if perms.get("can_manage_admins", False) else "❌"}
 """
         
-        # ===== ۵. ساخت کیبورد جدید =====
         keyboard = get_admin_permissions_keyboard(admin_id, perms, is_owner=False)
         
-        # ===== ۶. ادیت پیام =====
+        # ===== ۷. ادیت پیام =====
         try:
             bot.edit_message_text(
                 text,
@@ -464,28 +474,28 @@ def handle_callback_query(bot, call, user_data):
                 parse_mode='HTML',
                 reply_markup=keyboard
             )
-            # ===== ۷. پیام موفقیت =====
             perm_names = {
                 "can_view_stats": "مشاهده آمار",
                 "can_send_broadcast": "ارسال همگانی",
-                "can_manage_force_sub": "مدیریت قفل اسپانسر",
-                "can_manage_settings": "مدیریت تنظیمات",
+                "can_manage_force_sub": "قفل اسپانسر",
+                "can_manage_settings": "تنظیمات",
                 "can_manage_admins": "مدیریت ادمین‌ها"
             }
             bot.answer_callback_query(
-                call.id, 
-                f"✅ {perm_names.get(perm_key, perm_key)} {'فعال' if new_value else 'غیرفعال'} شد!", 
+                call.id,
+                f"✅ {perm_names.get(perm_key, perm_key)} {'فعال' if new_value else 'غیرفعال'} شد!",
                 show_alert=False
             )
+            logging.info(f"✅ Permission toggled successfully for {admin_id}")
         except Exception as e:
             if "message is not modified" in str(e):
                 bot.answer_callback_query(
-                    call.id, 
-                    f"ℹ️ دسترسی قبلاً {'فعال' if old_value else 'غیرفعال'} بود!", 
+                    call.id,
+                    f"ℹ️ دسترسی قبلاً {'فعال' if old_value else 'غیرفعال'} بود!",
                     show_alert=False
                 )
             else:
-                logging.error(f"Error in perm toggle: {e}")
+                logging.error(f"❌ Error in perm toggle: {e}")
                 bot.answer_callback_query(call.id, f"❌ خطا: {str(e)}", show_alert=True)
         return
     

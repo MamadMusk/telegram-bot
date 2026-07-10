@@ -24,7 +24,8 @@ from database import (
     get_rate_limit_enabled, set_rate_limit_enabled,
     get_rate_limit_seconds, set_rate_limit_seconds,
     get_admin_permissions, update_admin_permissions,
-    get_user
+    get_user,
+    get_admin_role  # <--- این رو اضافه کن
 )
 
 OWNER_ID = 1085150385
@@ -53,12 +54,10 @@ def check_user_subscription(bot, user_id):
     return len(not_subscribed) == 0, not_subscribed
 
 def has_permission(user_id, permission):
-    """بررسی دسترسی خاص برای یک ادمین"""
     perms = get_admin_permissions(user_id)
     return perms.get(permission, False)
 
 def is_owner(user_id):
-    """بررسی مالک ربات بودن"""
     return user_id == OWNER_ID
 
 # ===================================================
@@ -160,7 +159,6 @@ def show_stats(bot, chat_id, message_id=None):
         logging.error(f"Error in show_stats: {e}")
 
 def show_admin_list(bot, chat_id, message_id=None, current_user_id=None):
-    """نمایش لیست ادمین‌ها به صورت دکمه‌های شیشه‌ای"""
     try:
         if not is_owner(current_user_id) and not has_permission(current_user_id, "can_manage_admins"):
             bot.send_message(chat_id, MESSAGES["admin_no_permission"])
@@ -186,7 +184,6 @@ def show_admin_list(bot, chat_id, message_id=None, current_user_id=None):
         logging.error(f"Error in show_admin_list: {e}")
 
 def show_admin_permissions(bot, chat_id, admin_id, message_id=None, current_user_id=None):
-    """نمایش پنل مدیریت دسترسی‌های یک ادمین خاص"""
     try:
         if not is_owner(current_user_id) and not has_permission(current_user_id, "can_manage_admins"):
             bot.send_message(chat_id, MESSAGES["admin_no_permission"])
@@ -199,7 +196,7 @@ def show_admin_permissions(bot, chat_id, admin_id, message_id=None, current_user
         perms = get_admin_permissions(admin_id)
         admin_info = get_user(admin_id)
         name = admin_info.get('first_name', 'Unknown') if admin_info else 'Unknown'
-        role = get_admin_role(admin_id) or 'viewer'
+        role = get_admin_role(admin_id) or 'viewer'  # <--- اینجا اصلاح شد
         
         text = MESSAGES["admin_permissions_header"].format(
             name=name,
@@ -279,7 +276,6 @@ def show_rate_limit_settings(bot, chat_id, message_id=None):
 # 📨 ارسال همگانی با نمایش پیشرفت
 # ===================================================
 def start_broadcast(bot, chat_id, broadcast_text):
-    """شروع ارسال همگانی با نمایش پیشرفت"""
     users = get_all_users()
     total = len(users)
     if total == 0:
@@ -315,12 +311,13 @@ def start_broadcast(bot, chat_id, broadcast_text):
             if not job['running']:
                 break
             try:
-                bot.send_message(user['user_id'], broadcast_text)
+                # ===== اصلاح: استفاده از 'id' به جای 'user_id' =====
+                bot.send_message(user['id'], broadcast_text)
                 job['sent'] += 1
-                logging.info(f"✅ Broadcast sent to {user['user_id']}")
+                logging.info(f"✅ Broadcast sent to {user['id']}")
             except Exception as e:
                 job['failed'] += 1
-                logging.error(f"❌ Broadcast failed to {user['user_id']}: {e}")
+                logging.error(f"❌ Broadcast failed to {user['id']}: {e}")
             
             if (job['sent'] + job['failed']) % 5 == 0 or (job['sent'] + job['failed']) == job['total']:
                 update_broadcast_progress(bot, chat_id)
@@ -333,7 +330,6 @@ def start_broadcast(bot, chat_id, broadcast_text):
     threading.Thread(target=send_async, daemon=True).start()
 
 def update_broadcast_progress(bot, chat_id, final=False):
-    """به‌روزرسانی پیام پیشرفت ارسال همگانی"""
     job = broadcast_jobs.get(chat_id)
     if not job:
         return

@@ -1,7 +1,3 @@
-"""
-config.py — تنظیمات اصلی ربات (بدون وابستگی به pydantic)
-"""
-
 import os
 from typing import List, Optional
 
@@ -15,8 +11,8 @@ ADMIN_IDS: List[int] = [
     if x.strip().isdigit()
 ]
 
-# ===== مسیر دیتابیس =====
-DB_PATH = os.getenv("DB_PATH", "users.db")
+# ===== مسیر دیتابیس (Persistent Disk) =====
+DB_PATH = os.getenv("DB_PATH", "/data/users.db")
 DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "downloads")
 
 # ===== تنظیمات پیش‌فرض =====
@@ -27,6 +23,8 @@ DEFAULT_SETTINGS = {
     "is_active": "True",
     "broadcast_in_progress": "False",
     "force_channels": "",
+    "rate_limit_enabled": "False",
+    "rate_limit_seconds": "30",
 }
 
 # ============================================================
@@ -43,7 +41,6 @@ def get_db_setting(key: str, default: Optional[str] = None) -> str:
         pass
     return default or DEFAULT_SETTINGS.get(key, "")
 
-
 def get_db_setting_int(key: str, default: int = 0) -> int:
     try:
         val = get_db_setting(key)
@@ -51,13 +48,11 @@ def get_db_setting_int(key: str, default: int = 0) -> int:
     except (ValueError, TypeError):
         return default
 
-
 def get_db_setting_bool(key: str, default: bool = False) -> bool:
     val = get_db_setting(key)
     if val is None:
         return default
     return val.lower() in ("true", "1", "yes", "on")
-
 
 def is_admin(user_id: int) -> bool:
     if user_id in ADMIN_IDS:
@@ -68,7 +63,6 @@ def is_admin(user_id: int) -> bool:
     except Exception:
         return False
 
-
 def is_super_admin(user_id: int) -> bool:
     if user_id in ADMIN_IDS:
         return True
@@ -78,14 +72,12 @@ def is_super_admin(user_id: int) -> bool:
     except Exception:
         return False
 
-
 def get_force_channels() -> List[str]:
     try:
         from database import get_force_channels_list
         return get_force_channels_list()
     except Exception:
         return []
-
 
 def set_force_channels(channels: List[str]) -> None:
     try:

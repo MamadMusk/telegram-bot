@@ -1,7 +1,13 @@
 """
 database.py — Unified SQLite database layer (sync).
-"""
 
+Single source of truth for schema, migrations, and queries.
+Includes: users, downloads, settings, daily_quota (rate limiting), admins.
+
+All functions are SYNC (not async). They are designed to be called from:
+  - bot.py (aiogram handlers can call sync functions in thread pool via asyncio.to_thread)
+  - admin_panel.py (FastAPI sync def endpoints run in threadpool automatically)
+"""
 from __future__ import annotations
 
 import os
@@ -15,13 +21,23 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from config import DB_PATH, ADMIN_IDS
 
+# Module-level lock for write operations (SQLite doesn't handle concurrent
+# writes well; we serialize them ourselves).
 _write_lock = threading.Lock()
 
+
 def _now_iso() -> str:
+    """Current UTC timestamp as ISO string with timezone."""
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+# ============================================================
+#  Connection helpers
+# ============================================================
 
 @contextmanager
 def get_conn() -> Iterator[sqlite3.Connection]:
+    """Yield a SQLite connection with row factory enabled."""
     conn = sqlite3.connect(DB_PATH, timeout=30, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
@@ -32,10 +48,20 @@ def get_conn() -> Iterator[sqlite3.Connection]:
     finally:
         conn.close()
 
+
+# ============================================================
+#  Schema initialization & migrations
+# ============================================================
+
 def init_db() -> None:
+    """Create all tables if not exists, run migrations."""
+    # Ensure parent directory exists
     os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
+
     with get_conn() as conn:
         c = conn.cursor()
+
+        # ─── Users ───
         c.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id            INTEGER PRIMARY KEY,
@@ -48,6 +74,8 @@ def init_db() -> None:
                 last_seen     TEXT
             )
         """)
+
+        # ─── Downloads ───
         c.execute("""
             CREATE TABLE IF NOT EXISTS downloads (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,12 +88,16 @@ def init_db() -> None:
                 FOREIGN KEY(user_id) REFERENCES users(id)
             )
         """)
+
+        # ─── Settings (key-value) ───
         c.execute("""
             CREATE TABLE IF NOT EXISTS settings (
                 key   TEXT PRIMARY KEY,
                 value TEXT
             )
         """)
+
+        # ─── Daily quota (rate limiting) ───
         c.execute("""
             CREATE TABLE IF NOT EXISTS daily_quota (
                 user_id      INTEGER NOT NULL,
@@ -75,7 +107,8 @@ def init_db() -> None:
                 FOREIGN KEY(user_id) REFERENCES users(id)
             )
         """)
-        # ==== جدول admins با ستون permissions ====
+
+        # ─── Admins (RBAC) ───
         c.execute("""
             CREATE TABLE IF NOT EXISTS admins (
                 user_id    INTEGER PRIMARY KEY,
@@ -84,8 +117,10 @@ def init_db() -> None:
                 permissions TEXT DEFAULT '{}'
             )
         """)
-        defaults = [
-            ("welcome_message", "👋 سلام! به ربات دانلود اینستاگرام خوش آمدید."),
+
+        # ─── Default settings ───
+        defaults: List[Tuple[str, str]] = [
+            ("welcome_message", "👋 سلام! به ربات دانلود اینستاگرام خوش آمدید.\n\nلینک پست یا ریلز اینستاگرام را بفرستید تا آن را برایتان دانلود کنم."),
             ("is_active", "True"),
             ("max_file_size", "50"),
             ("daily_quota", "10"),
@@ -94,8 +129,12 @@ def init_db() -> None:
             ("rate_limit_enabled", "False"),
             ("rate_limit_seconds", "30"),
         ]
-        c.executemany("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", defaults)
-        # اضافه کردن ادمین‌های اصلی با role=owner و همه دسترسی‌ها
+        c.executemany(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+            defaults,
+        )
+
+        # ─── Seed admins from ADMIN_IDS env ───
         for admin_id in ADMIN_IDS:
             c.execute(
                 "INSERT OR IGNORE INTO admins (user_id, role, permissions) VALUES (?, 'owner', ?)",
@@ -105,19 +144,34 @@ def init_db() -> None:
                     "can_manage_force_sub": True,
                     "can_manage_settings": True,
                     "can_manage_admins": True,
-                    "can_remove_owner": False  # هیچکس نمی‌تونه owner رو حذف کنه
+                    "can_remove_owner": False
                 }))
             )
-        c.execute("CREATE INDEX IF NOT EXISTS idx_downloads_user ON downloads(user_id);")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_downloads_date ON downloads(download_date DESC);")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);")
+
+        # ─── Indexes for performance ───
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_downloads_user "
+            "ON downloads(user_id);"
+        )
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_downloads_date "
+            "ON downloads(download_date DESC);"
+        )
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_users_username "
+            "ON users(username);"
+        )
+
     print("✅ Database initialized at", DB_PATH)
+
 
 # ============================================================
 #  Users
 # ============================================================
+
 def add_user(user_id: int, username: Optional[str], first_name: Optional[str],
              last_name: Optional[str]) -> None:
+    """Insert a new user (idempotent). Updates last_seen if exists."""
     with _write_lock, get_conn() as conn:
         conn.execute(
             """
@@ -132,52 +186,82 @@ def add_user(user_id: int, username: Optional[str], first_name: Optional[str],
             (user_id, username, first_name, last_name, _now_iso()),
         )
 
+
 def is_banned(user_id: int) -> bool:
     with get_conn() as conn:
-        row = conn.execute("SELECT is_banned FROM users WHERE id = ?", (user_id,)).fetchone()
+        row = conn.execute(
+            "SELECT is_banned FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
         return bool(row and row["is_banned"])
+
 
 def ban_user(user_id: int) -> None:
     with _write_lock, get_conn() as conn:
-        conn.execute("UPDATE users SET is_banned = 1 WHERE id = ?", (user_id,))
+        conn.execute(
+            "UPDATE users SET is_banned = 1 WHERE id = ?", (user_id,)
+        )
+
 
 def unban_user(user_id: int) -> None:
     with _write_lock, get_conn() as conn:
-        conn.execute("UPDATE users SET is_banned = 0 WHERE id = ?", (user_id,))
+        conn.execute(
+            "UPDATE users SET is_banned = 0 WHERE id = ?", (user_id,)
+        )
+
 
 def get_user(user_id: int) -> Optional[Dict[str, Any]]:
     with get_conn() as conn:
-        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
         return dict(row) if row else None
 
-def get_users_paginated(page: int = 1, size: int = 50, search: str = "") -> Tuple[List[Dict[str, Any]], int]:
+
+def get_users_paginated(
+    page: int = 1, size: int = 50, search: str = ""
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Return (users, total_count) for given page."""
     offset = max(0, (page - 1) * size)
     with get_conn() as conn:
         if search:
             like = f"%{search}%"
             total = conn.execute(
-                "SELECT COUNT(*) FROM users WHERE username LIKE ? OR first_name LIKE ? OR last_name LIKE ? OR CAST(id AS TEXT) LIKE ?",
+                "SELECT COUNT(*) FROM users "
+                "WHERE username LIKE ? OR first_name LIKE ? OR last_name LIKE ? "
+                "OR CAST(id AS TEXT) LIKE ?",
                 (like, like, like, like),
             ).fetchone()[0]
             rows = conn.execute(
-                "SELECT * FROM users WHERE username LIKE ? OR first_name LIKE ? OR last_name LIKE ? OR CAST(id AS TEXT) LIKE ? ORDER BY joined_date DESC LIMIT ? OFFSET ?",
+                "SELECT * FROM users "
+                "WHERE username LIKE ? OR first_name LIKE ? OR last_name LIKE ? "
+                "OR CAST(id AS TEXT) LIKE ? "
+                "ORDER BY joined_date DESC LIMIT ? OFFSET ?",
                 (like, like, like, like, size, offset),
             ).fetchall()
         else:
             total = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-            rows = conn.execute("SELECT * FROM users ORDER BY joined_date DESC LIMIT ? OFFSET ?", (size, offset)).fetchall()
+            rows = conn.execute(
+                "SELECT * FROM users ORDER BY joined_date DESC LIMIT ? OFFSET ?",
+                (size, offset),
+            ).fetchall()
         return [dict(r) for r in rows], total
+
 
 # ============================================================
 #  Downloads
 # ============================================================
+
 def add_download(user_id: int, post_url: str, platform: str = "instagram",
                  status: str = "success", file_size_kb: Optional[int] = None) -> None:
     with _write_lock, get_conn() as conn:
         conn.execute(
-            "INSERT INTO downloads (user_id, post_url, platform, status, file_size_kb) VALUES (?, ?, ?, ?, ?)",
+            """
+            INSERT INTO downloads (user_id, post_url, platform, status, file_size_kb)
+            VALUES (?, ?, ?, ?, ?)
+            """,
             (user_id, post_url, platform, status, file_size_kb),
         )
+
 
 def get_recent_downloads(limit: int = 10) -> List[Dict[str, Any]]:
     with get_conn() as conn:
@@ -193,7 +277,10 @@ def get_recent_downloads(limit: int = 10) -> List[Dict[str, Any]]:
         ).fetchall()
         return [dict(r) for r in rows]
 
-def get_downloads_paginated(page: int = 1, size: int = 50) -> Tuple[List[Dict[str, Any]], int]:
+
+def get_downloads_paginated(
+    page: int = 1, size: int = 50
+) -> Tuple[List[Dict[str, Any]], int]:
     offset = max(0, (page - 1) * size)
     with get_conn() as conn:
         total = conn.execute("SELECT COUNT(*) FROM downloads").fetchone()[0]
@@ -209,7 +296,9 @@ def get_downloads_paginated(page: int = 1, size: int = 50) -> Tuple[List[Dict[st
         ).fetchall()
         return [dict(r) for r in rows], total
 
+
 def increment_download(user_id: int) -> None:
+    """افزایش تعداد دانلودهای امروز برای کاربر خاص"""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     with _write_lock, get_conn() as conn:
         conn.execute(
@@ -225,35 +314,50 @@ def increment_download(user_id: int) -> None:
             (user_id, today),
         )
 
+
 def get_total_downloads() -> int:
     with get_conn() as conn:
         row = conn.execute("SELECT COUNT(*) FROM downloads").fetchone()
         return row[0] if row else 0
 
+
 # ============================================================
-#  Settings
+#  Settings (key-value)
 # ============================================================
+
 def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
     with get_conn() as conn:
-        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key = ?", (key,)
+        ).fetchone()
         return row["value"] if row else default
+
 
 def set_setting(key: str, value: str) -> None:
     with _write_lock, get_conn() as conn:
-        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+            (key, value),
+        )
+
 
 def get_all_settings() -> Dict[str, str]:
     with get_conn() as conn:
         rows = conn.execute("SELECT key, value FROM settings").fetchall()
         return {r["key"]: r["value"] for r in rows}
 
+
 # ============================================================
-#  Daily quota
+#  Daily quota (rate limiting)
 # ============================================================
+
 def _today_str() -> str:
+    """Return today's date as YYYY-MM-DD in UTC."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
+
 def get_quota(user_id: int) -> int:
+    """Return number of downloads user has made today."""
     today = _today_str()
     with get_conn() as conn:
         row = conn.execute(
@@ -262,7 +366,9 @@ def get_quota(user_id: int) -> int:
         ).fetchone()
         return row["count"] if row else 0
 
+
 def increment_quota(user_id: int) -> int:
+    """Atomically increment the user's daily quota count, return new value."""
     today = _today_str()
     with _write_lock, get_conn() as conn:
         conn.execute(
@@ -279,32 +385,42 @@ def increment_quota(user_id: int) -> int:
         ).fetchone()
         return row["count"] if row else 1
 
+
 def check_quota(user_id: int) -> Tuple[bool, int, int]:
+    """Returns (allowed, used_today, limit). Limit=0 means unlimited."""
     limit_str = get_setting("daily_quota", "10")
     limit = int(limit_str) if limit_str else 10
     used = get_quota(user_id)
+
+    # Premium users bypass quota
     user = get_user(user_id)
     if user and user.get("is_premium"):
-        return True, used, 0
+        return True, used, 0  # unlimited
+
     if limit <= 0:
         return True, used, 0
     return (used < limit), used, limit
 
+
 # ============================================================
 #  Stats
 # ============================================================
+
 def get_stats() -> Dict[str, int]:
     with get_conn() as conn:
         users = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         downloads = conn.execute("SELECT COUNT(*) FROM downloads").fetchone()[0]
-        banned = conn.execute("SELECT COUNT(*) FROM users WHERE is_banned = 1").fetchone()[0]
+        banned = conn.execute(
+            "SELECT COUNT(*) FROM users WHERE is_banned = 1"
+        ).fetchone()[0]
         today = _today_str()
         today_downloads = conn.execute(
             "SELECT COUNT(*) FROM downloads WHERE date(download_date) = ?",
             (today,),
         ).fetchone()[0]
         active_users_7d = conn.execute(
-            "SELECT COUNT(DISTINCT user_id) FROM downloads WHERE download_date >= datetime('now', '-7 days')"
+            "SELECT COUNT(DISTINCT user_id) FROM downloads "
+            "WHERE download_date >= datetime('now', '-7 days')"
         ).fetchone()[0]
         return {
             "users": users,
@@ -314,7 +430,9 @@ def get_stats() -> Dict[str, int]:
             "active_users_7d": active_users_7d,
         }
 
+
 def get_daily_download_series(days: int = 30) -> List[Dict[str, Any]]:
+    """Return last N days of download counts for charting."""
     with get_conn() as conn:
         rows = conn.execute(
             """
@@ -328,26 +446,37 @@ def get_daily_download_series(days: int = 30) -> List[Dict[str, Any]]:
         ).fetchall()
         return [{"date": r["d"], "count": r["c"]} for r in rows]
 
+
 # ============================================================
-#  Admins (با پشتیبانی از permissions)
+#  Admins (RBAC) با پشتیبانی از permissions
 # ============================================================
+
 def is_admin(user_id: int) -> bool:
+    """True if user is in admins table OR in ADMIN_IDS env setting."""
     if user_id in ADMIN_IDS:
         return True
     with get_conn() as conn:
-        row = conn.execute("SELECT 1 FROM admins WHERE user_id = ?", (user_id,)).fetchone()
+        row = conn.execute(
+            "SELECT 1 FROM admins WHERE user_id = ?", (user_id,)
+        ).fetchone()
         return row is not None
 
+
 def get_admin_role(user_id: int) -> Optional[str]:
+    """Return role string ('owner', 'super', 'moderator', 'viewer') or None."""
     if user_id in ADMIN_IDS:
         return "owner"
     with get_conn() as conn:
-        row = conn.execute("SELECT role FROM admins WHERE user_id = ?", (user_id,)).fetchone()
+        row = conn.execute(
+            "SELECT role FROM admins WHERE user_id = ?", (user_id,)
+        ).fetchone()
         return row["role"] if row else None
 
+
 def get_admin_permissions(user_id: int) -> Dict[str, bool]:
+    """Return permissions dict for a user."""
+    # Owner always has full permissions
     if user_id in ADMIN_IDS:
-        # owner همه دسترسی‌ها رو داره
         return {
             "can_view_stats": True,
             "can_send_broadcast": True,
@@ -356,14 +485,30 @@ def get_admin_permissions(user_id: int) -> Dict[str, bool]:
             "can_manage_admins": True,
             "can_remove_owner": False
         }
+    
     with get_conn() as conn:
-        row = conn.execute("SELECT permissions FROM admins WHERE user_id = ?", (user_id,)).fetchone()
-        if row:
+        row = conn.execute(
+            "SELECT permissions FROM admins WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        
+        if row and row["permissions"]:
             try:
-                return json.loads(row["permissions"])
-            except:
+                perms = json.loads(row["permissions"])
+                # Ensure all keys exist
+                default_perms = {
+                    "can_view_stats": True,
+                    "can_send_broadcast": False,
+                    "can_manage_force_sub": False,
+                    "can_manage_settings": False,
+                    "can_manage_admins": False,
+                    "can_remove_owner": False
+                }
+                default_perms.update(perms)
+                return default_perms
+            except json.JSONDecodeError:
                 pass
-    # پیش‌فرض: فقط مشاهده آمار
+    
+    # Default permissions: only view stats
     return {
         "can_view_stats": True,
         "can_send_broadcast": False,
@@ -373,17 +518,21 @@ def get_admin_permissions(user_id: int) -> Dict[str, bool]:
         "can_remove_owner": False
     }
 
+
 def update_admin_permissions(user_id: int, permissions: Dict[str, bool]) -> None:
-    # نباید اجازه بدیم owner رو تغییر بدن
+    """Update permissions for an admin (cannot update owner)."""
     if user_id in ADMIN_IDS:
         return
+    
     with _write_lock, get_conn() as conn:
         conn.execute(
             "UPDATE admins SET permissions = ? WHERE user_id = ?",
             (json.dumps(permissions), user_id)
         )
 
+
 def add_admin(user_id: int, role: str = "viewer", permissions: Optional[Dict[str, bool]] = None) -> None:
+    """Add a new admin."""
     if permissions is None:
         permissions = {
             "can_view_stats": True,
@@ -393,20 +542,25 @@ def add_admin(user_id: int, role: str = "viewer", permissions: Optional[Dict[str
             "can_manage_admins": False,
             "can_remove_owner": False
         }
+    
     with _write_lock, get_conn() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO admins (user_id, role, permissions) VALUES (?, ?, ?)",
             (user_id, role, json.dumps(permissions))
         )
 
+
 def remove_admin(user_id: int) -> None:
-    # نمی‌ذاریم owner رو حذف کنن
+    """Remove an admin (cannot remove owner)."""
     if user_id in ADMIN_IDS:
         return
+    
     with _write_lock, get_conn() as conn:
         conn.execute("DELETE FROM admins WHERE user_id = ?", (user_id,))
 
+
 def get_all_admins() -> List[Dict[str, Any]]:
+    """Get list of all admins with details."""
     with get_conn() as conn:
         rows = conn.execute("""
             SELECT a.user_id, a.role, a.added_at, a.permissions,
@@ -415,9 +569,11 @@ def get_all_admins() -> List[Dict[str, Any]]:
             LEFT JOIN users u ON a.user_id = u.id
             ORDER BY a.added_at ASC
         """).fetchall()
+        
         result = []
         for r in rows:
             d = dict(r)
+            # Override for owner
             if d['user_id'] in ADMIN_IDS:
                 d['role'] = 'owner'
                 d['permissions'] = json.dumps({
@@ -431,32 +587,45 @@ def get_all_admins() -> List[Dict[str, Any]]:
             result.append(d)
         return result
 
+
 def is_super_admin(user_id: int) -> bool:
+    """Check if user is super admin (owner or role='super')."""
     if user_id in ADMIN_IDS:
         return True
     with get_conn() as conn:
-        row = conn.execute("SELECT role FROM admins WHERE user_id = ?", (user_id,)).fetchone()
-        return row and row["role"] == "super"
+        row = conn.execute(
+            "SELECT role FROM admins WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        return row and row["role"] in ["super", "owner"]
+
 
 # ============================================================
-#  Force Subscribe
+#  Force Subscribe (کانال‌های اجباری)
 # ============================================================
+
 def get_force_channels_list() -> List[str]:
+    """Get list of force subscribe channels."""
     channels_str = get_setting("force_channels", "")
     if not channels_str:
         return []
     return [ch.strip() for ch in channels_str.split(",") if ch.strip()]
 
+
 def set_force_channels_list(channels: List[str]) -> None:
+    """Set list of force subscribe channels."""
     set_setting("force_channels", ",".join(channels))
 
+
 def add_force_channel(channel: str) -> None:
+    """Add a channel to force subscribe list."""
     channels = get_force_channels_list()
     if channel not in channels:
         channels.append(channel)
         set_force_channels_list(channels)
 
+
 def remove_force_channel(channel: str) -> bool:
+    """Remove a channel from force subscribe list."""
     channels = get_force_channels_list()
     if channel in channels:
         channels.remove(channel)
@@ -464,46 +633,74 @@ def remove_force_channel(channel: str) -> bool:
         return True
     return False
 
+
 # ============================================================
-#  Rate Limit
+#  Rate Limit (محدودیت زمانی)
 # ============================================================
+
 def get_rate_limit_enabled() -> bool:
+    """Get rate limit enabled status."""
     val = get_setting("rate_limit_enabled", "False")
     return val.lower() == "true"
 
+
 def set_rate_limit_enabled(enabled: bool) -> None:
+    """Set rate limit enabled status."""
     set_setting("rate_limit_enabled", "True" if enabled else "False")
 
+
 def get_rate_limit_seconds() -> int:
+    """Get rate limit seconds."""
     val = get_setting("rate_limit_seconds", "30")
     try:
         return int(val)
-    except:
+    except ValueError:
         return 30
 
+
 def set_rate_limit_seconds(seconds: int) -> None:
+    """Set rate limit seconds."""
     set_setting("rate_limit_seconds", str(seconds))
+
 
 # ============================================================
 #  Broadcast
 # ============================================================
+
 def get_all_user_ids(include_banned: bool = False) -> List[int]:
+    """Get all user IDs."""
     with get_conn() as conn:
         if include_banned:
             rows = conn.execute("SELECT id FROM users").fetchall()
         else:
-            rows = conn.execute("SELECT id FROM users WHERE is_banned = 0").fetchall()
+            rows = conn.execute(
+                "SELECT id FROM users WHERE is_banned = 0"
+            ).fetchall()
         return [r["id"] for r in rows]
 
+
 def get_all_users() -> List[Dict[str, Any]]:
+    """Get all users with details."""
     with get_conn() as conn:
         rows = conn.execute("SELECT * FROM users ORDER BY joined_date DESC").fetchall()
         return [dict(r) for r in rows]
 
+
 def get_user_count() -> int:
+    """Get total number of users."""
     with get_conn() as conn:
         row = conn.execute("SELECT COUNT(*) FROM users").fetchone()
         return row[0] if row else 0
 
+
 def get_all_users_count() -> int:
+    """Alias for get_user_count."""
     return get_user_count()
+
+
+# ============================================================
+#  Module-level init
+# ============================================================
+
+# Do NOT auto-init at import time. Caller (bot.py, admin_panel.py) must call
+# init_db() explicitly. This avoids surprises in tests and during migrations.

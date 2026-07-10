@@ -9,10 +9,21 @@ app = Flask(__name__)
 
 logging.basicConfig(level=logging.INFO)
 
+# ===== هندلر ساده برای /start =====
+@bot.message_handler(commands=['start'])
+def handle_start(message):
+    bot.reply_to(message, "✅ ربات فعال است! Webhook درست کار می‌کند.")
+
+# ===== هندلر برای همه پیام‌ها =====
+@bot.message_handler(func=lambda message: True)
+def handle_all_messages(message):
+    bot.reply_to(message, f"📩 پیام شما دریافت شد: {message.text}")
+
 @app.route('/', methods=['POST'])
 def webhook():
     try:
         json_string = request.get_data().decode('utf-8')
+        logging.info(f"📩 Webhook received: {json_string[:100]}...")
         update = telebot.types.Update.de_json(json_string)
         bot.process_new_updates([update])
         return 'OK', 200

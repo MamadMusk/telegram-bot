@@ -18,6 +18,9 @@ logging.basicConfig(level=logging.INFO)
 # دیکشنری برای ذخیره داده‌های موقت کاربران
 user_data = {}
 
+# دیکشنری برای ذخیره زمان آخرین دانلود کاربران (محدودیت زمانی)
+user_last_download = {}
+
 @app.route('/', methods=['POST'])
 def webhook():
     try:
@@ -32,7 +35,7 @@ def webhook():
         
         # ===== پردازش پیام =====
         elif update.message:
-            handle_message(bot, update.message, user_data)
+            handle_message(bot, update.message, user_data, user_last_download)
         
         return 'OK', 200
     except Exception as e:

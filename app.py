@@ -17,8 +17,12 @@ from database import (
     increment_download, get_total_downloads,
     get_force_channels_list, add_force_channel, remove_force_channel,
     get_all_admins, add_admin, remove_admin, is_super_admin,
-    get_all_users_count, set_setting, get_setting
+    get_all_users_count, set_setting, get_setting,
+    init_db
 )
+
+# ===== راه‌اندازی دیتابیس =====
+init_db()
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)

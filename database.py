@@ -64,15 +64,16 @@ def init_db() -> None:
             )
         """)
 
-        # ─── Downloads ───
+        # ─── Downloads (با پشتیبانی از خطا) ───
         c.execute("""
             CREATE TABLE IF NOT EXISTS downloads (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id       INTEGER NOT NULL,
                 post_url      TEXT NOT NULL,
-                platform      TEXT DEFAULT 'instagram',
+                platform      TEXT DEFAULT 'unknown',
                 status        TEXT DEFAULT 'success',
                 file_size_kb  INTEGER,
+                error_message TEXT,
                 download_date TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY(user_id) REFERENCES users(id)
             )
@@ -281,7 +282,6 @@ def get_premium_settings(user_id: int) -> Dict[str, Any]:
         if not row:
             return {"is_premium": False}
         result = dict(row)
-        # محاسبه روزهای باقی‌مانده
         if result.get("premium_expire"):
             try:
                 expire = datetime.fromisoformat(result["premium_expire"])
@@ -293,7 +293,7 @@ def get_premium_settings(user_id: int) -> Dict[str, Any]:
             except:
                 result["days_left"] = 0
         else:
-            result["days_left"] = None  # نامحدود
+            result["days_left"] = None
         return result
 
 
@@ -307,7 +307,6 @@ def get_all_premium_users() -> List[Dict[str, Any]]:
         result = []
         for row in rows:
             user = dict(row)
-            # محاسبه روزهای باقی‌مانده
             if user.get("premium_expire"):
                 try:
                     expire = datetime.fromisoformat(user["premium_expire"])
@@ -334,14 +333,13 @@ def get_premium_user_count() -> int:
 def set_admin_expire(user_id: int, expire_days: Optional[int] = None) -> None:
     """تنظیم تاریخ انقضای ادمین."""
     if user_id in ADMIN_IDS:
-        return  # owner را نمی‌توان تغییر داد
+        return
     with _write_lock, get_conn() as conn:
         expire_str = None
         if expire_days is not None and expire_days > 0:
             expire_date = datetime.now(timezone.utc) + timedelta(days=expire_days)
             expire_str = expire_date.isoformat(timespec="seconds")
         conn.execute("UPDATE admins SET expire_date = ? WHERE user_id = ?", (expire_str, user_id))
-        # همچنین در users هم ذخیره کن
         conn.execute("UPDATE users SET admin_expire = ? WHERE id = ?", (expire_str, user_id))
 
 
@@ -398,17 +396,15 @@ def increment_quota(user_id: int) -> int:
 
 def check_quota(user_id: int) -> Tuple[bool, int, int]:
     """بررسی سقف دانلود روزانه (با در نظر گرفتن وضعیت Premium)."""
-    # دریافت تنظیمات ویژه کاربر
     premium_settings = get_premium_settings(user_id)
     if premium_settings.get("is_premium") and premium_settings.get("premium_daily_quota") is not None:
         limit = premium_settings["premium_daily_quota"]
     else:
         limit_str = get_setting("daily_quota", "10")
         limit = int(limit_str) if limit_str else 10
-
     used = get_quota(user_id)
     if limit <= 0:
-        return True, used, 0  # نامحدود
+        return True, used, 0
     return (used < limit), used, limit
 
 
@@ -434,9 +430,55 @@ def increment_download(user_id: int) -> None:
         )
 
 
+def add_download(user_id: int, post_url: str, platform: str = "unknown",
+                 status: str = "success", file_size_kb: Optional[int] = None,
+                 error_message: Optional[str] = None) -> None:
+    """ثبت دانلود با اطلاعات کامل (برای گزارش‌ها)."""
+    with _write_lock, get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO downloads (user_id, post_url, platform, status, file_size_kb, error_message)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, post_url, platform, status, file_size_kb, error_message)
+        )
+        if status == "success":
+            today = _today_str()
+            conn.execute(
+                """
+                INSERT INTO daily_quota (user_id, quota_date, count)
+                VALUES (?, ?, 1)
+                ON CONFLICT(user_id, quota_date) DO UPDATE SET count = count + 1
+                """,
+                (user_id, today),
+            )
+
+
 def get_total_downloads() -> int:
     with get_conn() as conn:
         row = conn.execute("SELECT COUNT(*) FROM downloads").fetchone()
+        return row[0] if row else 0
+
+
+def get_failed_downloads_today() -> int:
+    """دریافت تعداد دانلودهای ناموفق امروز."""
+    today = _today_str()
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM downloads WHERE status = 'failed' AND date(download_date) = ?",
+            (today,)
+        ).fetchone()
+        return row[0] if row else 0
+
+
+def get_new_users_today() -> int:
+    """دریافت تعداد کاربران جدید امروز."""
+    today = _today_str()
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM users WHERE date(joined_date) = ?",
+            (today,)
+        ).fetchone()
         return row[0] if row else 0
 
 
@@ -714,12 +756,10 @@ def get_all_user_ids(include_banned: bool = False) -> List[int]:
 def toggle_premium_user(user_id: int, enabled: bool, expire_days: Optional[int] = None,
                         daily_quota: Optional[int] = None, max_file_size: Optional[int] = None,
                         rate_limit: Optional[int] = None) -> None:
-    """فعال/غیرفعال کردن کاربر ویژه با تنظیمات."""
     set_premium_status(user_id, enabled, expire_days, daily_quota, max_file_size, rate_limit)
 
 
 def remove_premium_user(user_id: int) -> None:
-    """حذف وضعیت ویژه از کاربر."""
     with _write_lock, get_conn() as conn:
         conn.execute("""
             UPDATE users SET
@@ -733,7 +773,6 @@ def remove_premium_user(user_id: int) -> None:
 
 
 def get_premium_user_details(user_id: int) -> Optional[Dict[str, Any]]:
-    """دریافت جزئیات کامل کاربر ویژه."""
     user = get_user(user_id)
     if not user or user.get("is_premium") != 1:
         return None
@@ -747,7 +786,6 @@ def get_premium_user_details(user_id: int) -> Optional[Dict[str, Any]]:
 # ============================================================
 
 def get_user_rate_limit(user_id: int) -> int:
-    """دریافت محدودیت زمانی برای کاربر (با اولویت تنظیمات ویژه)."""
     premium_settings = get_premium_settings(user_id)
     if premium_settings.get("is_premium") and premium_settings.get("premium_rate_limit") is not None:
         return premium_settings["premium_rate_limit"]
@@ -755,7 +793,6 @@ def get_user_rate_limit(user_id: int) -> int:
 
 
 def get_user_max_file_size(user_id: int) -> int:
-    """دریافت حداکثر حجم فایل برای کاربر (با اولویت تنظیمات ویژه)."""
     premium_settings = get_premium_settings(user_id)
     if premium_settings.get("is_premium") and premium_settings.get("premium_max_file_size") is not None:
         return premium_settings["premium_max_file_size"]
@@ -767,7 +804,6 @@ def get_user_max_file_size(user_id: int) -> int:
 
 
 def get_user_daily_quota(user_id: int) -> int:
-    """دریافت سقف دانلود روزانه برای کاربر (با اولویت تنظیمات ویژه)."""
     premium_settings = get_premium_settings(user_id)
     if premium_settings.get("is_premium") and premium_settings.get("premium_daily_quota") is not None:
         return premium_settings["premium_daily_quota"]
@@ -779,7 +815,6 @@ def get_user_daily_quota(user_id: int) -> int:
 
 
 def is_user_exempt_from_force_subscribe(user_id: int) -> bool:
-    """بررسی معافیت کاربر از عضویت اجباری."""
     if is_admin(user_id):
         return True
     return is_premium_user(user_id)

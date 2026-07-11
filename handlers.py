@@ -5,6 +5,7 @@ import os
 import requests
 import yt_dlp
 import threading
+import inspect  # برای بررسی پارامترهای توابع
 from datetime import datetime, timezone
 from telebot.types import MenuButtonCommands, InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -52,7 +53,10 @@ broadcast_jobs = {}
 # ===================================================
 def send_welcome_message(bot, chat_id, user_id, lang=None):
     if lang is None:
-        lang = get_user_language(user_id) or "fa"
+        try:
+            lang = get_user_language(user_id) or "fa"
+        except:
+            lang = "fa"
     if is_admin(user_id):
         keyboard = get_admin_keyboard(lang)
     else:
@@ -83,10 +87,13 @@ def check_user_subscription(bot, user_id):
     return len(not_subscribed) == 0, not_subscribed
 
 def has_permission(user_id, permission):
-    perms = get_admin_permissions(user_id)
-    result = perms.get(permission, False)
-    logging.info(f"🔍 Permission check: {permission} for {user_id} = {result}")
-    return result
+    try:
+        perms = get_admin_permissions(user_id)
+        result = perms.get(permission, False)
+        logging.info(f"🔍 Permission check: {permission} for {user_id} = {result}")
+        return result
+    except:
+        return False
 
 def is_owner(user_id):
     return user_id == OWNER_ID
@@ -164,15 +171,16 @@ def download_instagram_post(url, user_id):
 # ===================================================
 def generate_daily_report():
     """تولید گزارش روزانه از وضعیت ربات"""
-    stats = get_stats()
-    total_downloads = get_total_downloads()
-    premium_users = get_all_premium_users()
-    admins = get_all_admins()
-    
-    new_users_today = get_new_users_today()
-    failed_downloads = get_failed_downloads_today()
-    
-    report = f"""📊 <b>گزارش روزانه ربات</b>
+    try:
+        stats = get_stats()
+        total_downloads = get_total_downloads()
+        premium_users = get_all_premium_users()
+        admins = get_all_admins()
+        
+        new_users_today = get_new_users_today()
+        failed_downloads = get_failed_downloads_today()
+        
+        report = f"""📊 <b>گزارش روزانه ربات</b>
 
 📅 تاریخ: {datetime.now().strftime('%Y/%m/%d')}
 ⏰ زمان: {datetime.now().strftime('%H:%M')}
@@ -190,25 +198,28 @@ def generate_daily_report():
 
 👑 <b>کاربران ویژه فعال:</b>
 """
-    if premium_users:
-        for user in premium_users[:10]:
-            name = user.get('first_name', 'Unknown')
-            username = user.get('username', '')
-            days_left = user.get('days_left')
-            days_text = f"({days_left} روز مانده)" if days_left is not None else "(همیشه)"
-            report += f"• {name} (@{username}) {days_text}\n"
-        if len(premium_users) > 10:
-            report += f"... و {len(premium_users) - 10} کاربر دیگر\n"
-    else:
-        report += "• هیچ کاربر ویژه‌ای فعال نیست.\n"
-    
-    report += f"""
+        if premium_users:
+            for user in premium_users[:10]:
+                name = user.get('first_name', 'Unknown')
+                username = user.get('username', '')
+                days_left = user.get('days_left')
+                days_text = f"({days_left} روز مانده)" if days_left is not None else "(همیشه)"
+                report += f"• {name} (@{username}) {days_text}\n"
+            if len(premium_users) > 10:
+                report += f"... و {len(premium_users) - 10} کاربر دیگر\n"
+        else:
+            report += "• هیچ کاربر ویژه‌ای فعال نیست.\n"
+        
+        report += f"""
 📊 <b>وضعیت ربات:</b>
 • وضعیت: {'🟢 فعال' if get_setting('is_active', 'True') == 'True' else '🔴 غیرفعال'}
 • سقف دانلود روزانه: {get_setting('daily_quota', '10')}
 • محدودیت زمانی: {'فعال' if get_rate_limit_enabled() else 'غیرفعال'} ({get_rate_limit_seconds()} ثانیه)
 """
-    return report
+        return report
+    except Exception as e:
+        logging.error(f"Error generating report: {e}")
+        return "❌ خطا در تولید گزارش"
 
 def send_daily_report(bot, chat_id, lang="fa"):
     """ارسال گزارش روزانه به ادمین"""
@@ -1059,52 +1070,108 @@ def handle_callback_query(bot, call, user_data):
         return
 
 # ===================================================
-# 📨 پردازش پیام
+# 📨 پردازش پیام (نسخه‌ی اصلی با مدیریت خطا)
 # ===================================================
 def handle_message(bot, message, user_data, user_last_download=None):
-    chat_id = message.chat.id
-    user_id = message.from_user.id
-    text = message.text
-    username = message.from_user.username
-    first_name = message.from_user.first_name
-    last_name = message.from_user.last_name
-    logging.info(f"📨 Message from {chat_id}: {text}")
-    lang = get_user_language(user_id) or "fa"
-    add_user(user_id, username, first_name, last_name, lang)
-    
-    # عضویت اجباری (با معافیت ویژه)
-    if not is_admin(user_id):
-        is_subscribed, not_subscribed = check_user_subscription(bot, user_id)
-        if not is_subscribed:
-            channels_text = "\n".join([f"• {ch}" for ch in not_subscribed])
-            keyboard = get_force_sub_keyboard(not_subscribed)
-            bot.send_message(
-                chat_id,
-                get_message("force_sub_required", lang).format(channels=channels_text),
-                reply_markup=keyboard,
-                parse_mode='HTML'
-            )
-            return
-    
-    # پردازش مراحل
-    step_data = user_data.get(chat_id, {})
-    step = step_data.get('step')
-    if not step and hasattr(bot, 'user_data'):
-        step_data = bot.user_data.get(chat_id, {})
-        step = step_data.get('step')
-    
-    # مراحل مدیریت ادمین
-    if step == 'add_admin':
-        if not is_owner(user_id) and not has_permission(user_id, "can_manage_admins"):
-            bot.send_message(chat_id, get_message("admin_no_permission", lang))
-            return
+    try:
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+        text = message.text or ""
+        username = message.from_user.username or ""
+        first_name = message.from_user.first_name or ""
+        last_name = message.from_user.last_name or ""
+        logging.info(f"📨 Message from {chat_id}: {text}")
+        
+        # ===== دریافت زبان کاربر با مدیریت خطا =====
         try:
-            new_admin_id = int(text.strip())
-            if new_admin_id == user_id:
-                bot.send_message(chat_id, "❌ نمی‌توانید خودتان را دوباره اضافه کنید!")
+            lang = get_user_language(user_id) or "fa"
+        except Exception as e:
+            logging.error(f"Error getting language: {e}")
+            lang = "fa"
+        
+        # ===== اضافه کردن کاربر با مدیریت خطا (سازگار با هر امضایی) =====
+        try:
+            # بررسی امضای تابع add_user
+            sig = inspect.signature(add_user)
+            params = list(sig.parameters.keys())
+            
+            # اگر پارامتر lang وجود دارد، با lang صدا بزن
+            if 'lang' in params:
+                add_user(user_id, username, first_name, last_name, lang)
             else:
-                add_admin(new_admin_id, "moderator")
-                bot.send_message(chat_id, get_message("admin_add_success", lang).format(role="moderator"))
+                # در غیر این صورت فقط ۴ پارامتر اول رو پاس بده
+                add_user(user_id, username, first_name, last_name)
+                # سپس زبان رو جداگانه تنظیم کن
+                try:
+                    set_user_language(user_id, lang)
+                except:
+                    pass
+        except Exception as e:
+            logging.error(f"Error adding user: {e}")
+            # حتی اگر کاربر اضافه نشد، ادامه بده تا ربات حداقل پاسخ بده
+        
+        # ===== عضویت اجباری =====
+        if not is_admin(user_id):
+            try:
+                is_subscribed, not_subscribed = check_user_subscription(bot, user_id)
+                if not is_subscribed:
+                    channels_text = "\n".join([f"• {ch}" for ch in not_subscribed])
+                    keyboard = get_force_sub_keyboard(not_subscribed)
+                    bot.send_message(
+                        chat_id,
+                        get_message("force_sub_required", lang).format(channels=channels_text),
+                        reply_markup=keyboard,
+                        parse_mode='HTML'
+                    )
+                    return
+            except Exception as e:
+                logging.error(f"Error checking subscription: {e}")
+                # در صورت خطا، اجازه بده ادامه بده (مشکل عضویت رو نادیده بگیر)
+        
+        # ===== پردازش مراحل (user_data) =====
+        step_data = user_data.get(chat_id, {})
+        step = step_data.get('step')
+        if not step and hasattr(bot, 'user_data'):
+            step_data = bot.user_data.get(chat_id, {})
+            step = step_data.get('step')
+        
+        # ===== مراحل مدیریت ادمین =====
+        if step == 'add_admin':
+            if not is_owner(user_id) and not has_permission(user_id, "can_manage_admins"):
+                bot.send_message(chat_id, get_message("admin_no_permission", lang))
+                return
+            try:
+                new_admin_id = int(text.strip())
+                if new_admin_id == user_id:
+                    bot.send_message(chat_id, "❌ نمی‌توانید خودتان را دوباره اضافه کنید!")
+                else:
+                    add_admin(new_admin_id, "moderator")
+                    bot.send_message(chat_id, get_message("admin_add_success", lang).format(role="moderator"))
+                    if chat_id in user_data:
+                        msg_id = user_data[chat_id].get('message_id')
+                        if msg_id:
+                            try:
+                                bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+                            except:
+                                pass
+                    show_admin_list(bot, chat_id, None, user_id)
+            except ValueError:
+                bot.send_message(chat_id, get_message("admin_invalid_id", lang))
+            if chat_id in user_data:
+                del user_data[chat_id]
+            if hasattr(bot, 'user_data') and chat_id in bot.user_data:
+                del bot.user_data[chat_id]
+            return
+        
+        elif step == 'admin_expire':
+            if not is_owner(user_id) and not has_permission(user_id, "can_manage_admins"):
+                bot.send_message(chat_id, get_message("admin_no_permission", lang))
+                return
+            admin_id = step_data.get('admin_id')
+            try:
+                days = int(text.strip())
+                set_admin_expire(admin_id, days if days > 0 else None)
+                bot.send_message(chat_id, get_message("premium_expire_success", lang))
                 if chat_id in user_data:
                     msg_id = user_data[chat_id].get('message_id')
                     if msg_id:
@@ -1112,296 +1179,310 @@ def handle_message(bot, message, user_data, user_last_download=None):
                             bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
                         except:
                             pass
-                show_admin_list(bot, chat_id, None, user_id)
-        except ValueError:
-            bot.send_message(chat_id, get_message("admin_invalid_id", lang))
-        if chat_id in user_data:
-            del user_data[chat_id]
-        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
-            del bot.user_data[chat_id]
-        return
-    elif step == 'admin_expire':
-        if not is_owner(user_id) and not has_permission(user_id, "can_manage_admins"):
-            bot.send_message(chat_id, get_message("admin_no_permission", lang))
-            return
-        admin_id = step_data.get('admin_id')
-        try:
-            days = int(text.strip())
-            set_admin_expire(admin_id, days if days > 0 else None)
-            bot.send_message(chat_id, get_message("premium_expire_success", lang))
+                show_admin_permissions(bot, chat_id, admin_id, None, user_id)
+            except ValueError:
+                bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
             if chat_id in user_data:
-                msg_id = user_data[chat_id].get('message_id')
-                if msg_id:
-                    try:
-                        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
-                    except:
-                        pass
-            show_admin_permissions(bot, chat_id, admin_id, None, user_id)
-        except ValueError:
-            bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
-        if chat_id in user_data:
-            del user_data[chat_id]
-        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
-            del bot.user_data[chat_id]
-        return
-    
-    # مراحل مدیریت کاربران ویژه
-    elif step == 'add_premium':
-        if not is_owner(user_id) and not has_permission(user_id, "can_manage_premium"):
-            bot.send_message(chat_id, get_message("admin_no_permission", lang))
+                del user_data[chat_id]
+            if hasattr(bot, 'user_data') and chat_id in bot.user_data:
+                del bot.user_data[chat_id]
             return
-        try:
-            premium_user_id = int(text.strip())
-            user_info = get_user(premium_user_id)
-            if not user_info:
-                bot.send_message(chat_id, "❌ کاربر پیدا نشد!")
+        
+        # ===== مراحل مدیریت کاربران ویژه =====
+        elif step == 'add_premium':
+            if not is_owner(user_id) and not has_permission(user_id, "can_manage_premium"):
+                bot.send_message(chat_id, get_message("admin_no_permission", lang))
                 return
-            set_premium_status(premium_user_id, True)
-            bot.send_message(chat_id, f"✅ کاربر {premium_user_id} به ویژه اضافه شد.")
+            try:
+                premium_user_id = int(text.strip())
+                user_info = get_user(premium_user_id)
+                if not user_info:
+                    bot.send_message(chat_id, "❌ کاربر پیدا نشد!")
+                    return
+                set_premium_status(premium_user_id, True)
+                bot.send_message(chat_id, f"✅ کاربر {premium_user_id} به ویژه اضافه شد.")
+                if chat_id in user_data:
+                    msg_id = user_data[chat_id].get('message_id')
+                    if msg_id:
+                        try:
+                            bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+                        except:
+                            pass
+                show_premium_users(bot, chat_id, None, user_id)
+            except ValueError:
+                bot.send_message(chat_id, "❌ آیدی وارد شده معتبر نیست!")
             if chat_id in user_data:
-                msg_id = user_data[chat_id].get('message_id')
-                if msg_id:
-                    try:
-                        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
-                    except:
-                        pass
-            show_premium_users(bot, chat_id, None, user_id)
-        except ValueError:
-            bot.send_message(chat_id, "❌ آیدی وارد شده معتبر نیست!")
-        if chat_id in user_data:
-            del user_data[chat_id]
-        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
-            del bot.user_data[chat_id]
-        return
-    elif step == 'premium_expire':
-        if not is_owner(user_id) and not has_permission(user_id, "can_manage_premium"):
-            bot.send_message(chat_id, get_message("admin_no_permission", lang))
+                del user_data[chat_id]
+            if hasattr(bot, 'user_data') and chat_id in bot.user_data:
+                del bot.user_data[chat_id]
             return
-        premium_user_id = step_data.get('premium_user_id')
-        try:
-            days = int(text.strip())
-            set_premium_status(premium_user_id, True, expire_days=days if days > 0 else None)
-            bot.send_message(chat_id, get_message("premium_expire_success", lang))
-            if chat_id in user_data:
-                msg_id = user_data[chat_id].get('message_id')
-                if msg_id:
-                    try:
-                        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
-                    except:
-                        pass
-            show_premium_user_settings(bot, chat_id, premium_user_id, None, user_id)
-        except ValueError:
-            bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
-        if chat_id in user_data:
-            del user_data[chat_id]
-        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
-            del bot.user_data[chat_id]
-        return
-    elif step == 'premium_quota':
-        if not is_owner(user_id) and not has_permission(user_id, "can_manage_premium"):
-            bot.send_message(chat_id, get_message("admin_no_permission", lang))
-            return
-        premium_user_id = step_data.get('premium_user_id')
-        try:
-            quota = int(text.strip())
-            set_premium_status(premium_user_id, True, daily_quota=quota)
-            bot.send_message(chat_id, get_message("settings_updated", lang))
-            if chat_id in user_data:
-                msg_id = user_data[chat_id].get('message_id')
-                if msg_id:
-                    try:
-                        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
-                    except:
-                        pass
-            show_premium_user_settings(bot, chat_id, premium_user_id, None, user_id)
-        except ValueError:
-            bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
-        if chat_id in user_data:
-            del user_data[chat_id]
-        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
-            del bot.user_data[chat_id]
-        return
-    elif step == 'premium_size':
-        if not is_owner(user_id) and not has_permission(user_id, "can_manage_premium"):
-            bot.send_message(chat_id, get_message("admin_no_permission", lang))
-            return
-        premium_user_id = step_data.get('premium_user_id')
-        try:
-            size = int(text.strip())
-            set_premium_status(premium_user_id, True, max_file_size=size)
-            bot.send_message(chat_id, get_message("settings_updated", lang))
-            if chat_id in user_data:
-                msg_id = user_data[chat_id].get('message_id')
-                if msg_id:
-                    try:
-                        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
-                    except:
-                        pass
-            show_premium_user_settings(bot, chat_id, premium_user_id, None, user_id)
-        except ValueError:
-            bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
-        if chat_id in user_data:
-            del user_data[chat_id]
-        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
-            del bot.user_data[chat_id]
-        return
-    elif step == 'premium_rate':
-        if not is_owner(user_id) and not has_permission(user_id, "can_manage_premium"):
-            bot.send_message(chat_id, get_message("admin_no_permission", lang))
-            return
-        premium_user_id = step_data.get('premium_user_id')
-        try:
-            rate = int(text.strip())
-            set_premium_status(premium_user_id, True, rate_limit=rate)
-            bot.send_message(chat_id, get_message("settings_updated", lang))
-            if chat_id in user_data:
-                msg_id = user_data[chat_id].get('message_id')
-                if msg_id:
-                    try:
-                        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
-                    except:
-                        pass
-            show_premium_user_settings(bot, chat_id, premium_user_id, None, user_id)
-        except ValueError:
-            bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
-        if chat_id in user_data:
-            del user_data[chat_id]
-        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
-            del bot.user_data[chat_id]
-        return
-    
-    # تنظیمات عمومی
-    elif step == 'set_daily_quota':
-        if not is_owner(user_id) and not has_permission(user_id, "can_manage_settings"):
-            bot.send_message(chat_id, get_message("admin_no_permission", lang))
-            return
-        try:
-            quota = int(text.strip())
-            set_setting("daily_quota", str(quota))
-            bot.send_message(chat_id, get_message("settings_updated", lang))
-            if chat_id in user_data:
-                msg_id = user_data[chat_id].get('message_id')
-                if msg_id:
-                    try:
-                        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
-                    except:
-                        pass
-            show_settings(bot, chat_id)
-        except ValueError:
-            bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
-        if chat_id in user_data:
-            del user_data[chat_id]
-        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
-            del bot.user_data[chat_id]
-        return
-    elif step == 'set_max_file_size':
-        if not is_owner(user_id) and not has_permission(user_id, "can_manage_settings"):
-            bot.send_message(chat_id, get_message("admin_no_permission", lang))
-            return
-        try:
-            size = int(text.strip())
-            set_setting("max_file_size", str(size))
-            bot.send_message(chat_id, get_message("settings_updated", lang))
-            if chat_id in user_data:
-                msg_id = user_data[chat_id].get('message_id')
-                if msg_id:
-                    try:
-                        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
-                    except:
-                        pass
-            show_settings(bot, chat_id)
-        except ValueError:
-            bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
-        if chat_id in user_data:
-            del user_data[chat_id]
-        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
-            del bot.user_data[chat_id]
-        return
-    
-    # اضافه کردن کانال اجباری
-    elif step == 'add_force_channel':
-        if not is_owner(user_id) and not has_permission(user_id, "can_manage_force_sub"):
-            bot.send_message(chat_id, get_message("admin_no_permission", lang))
-            return
-        channel = text.strip()
-        if not channel.startswith('@'):
-            bot.send_message(chat_id, "❌ لطفاً آیدی کانال را با @ شروع کنید!")
-            return
-        add_force_channel(channel)
-        bot.send_message(chat_id, f"✅ کانال {channel} به لیست اضافه شد.")
-        if chat_id in user_data:
-            msg_id = user_data[chat_id].get('message_id')
-            if msg_id:
-                try:
-                    bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
-                except:
-                    pass
-        show_force_sub_settings(bot, chat_id)
-        if chat_id in user_data:
-            del user_data[chat_id]
-        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
-            del bot.user_data[chat_id]
-        return
-    
-    # ارسال همگانی
-    elif step == 'broadcast':
-        process_broadcast_message(bot, message, user_data)
-        return
-    
-    # ===== پردازش معمولی (لینک یا دستور) =====
-    if text.startswith('/'):
-        # دستورات به صورت جداگانه در app.py یا bot.py پردازش می‌شوند
-        pass
-    elif text.startswith('http://') or text.startswith('https://'):
-        # ===== دانلود =====
-        # بررسی فعال بودن ربات
-        if get_setting("is_active", "True") != "True":
-            bot.send_message(chat_id, get_message("bot_inactive", lang))
-            return
-        # بررسی سقف دانلود
-        if not is_admin(user_id):
-            daily_quota = get_user_daily_quota(user_id)
-            if daily_quota is not None and daily_quota <= 0:
-                bot.send_message(chat_id, get_message("daily_quota_reached", lang))
+        
+        elif step == 'premium_expire':
+            if not is_owner(user_id) and not has_permission(user_id, "can_manage_premium"):
+                bot.send_message(chat_id, get_message("admin_no_permission", lang))
                 return
-        # محدودیت زمانی
-        if get_rate_limit_enabled() and not is_admin(user_id):
-            last_time = user_last_download.get(user_id, 0) if user_last_download is not None else 0
-            current_time = time.time()
-            if current_time - last_time < get_rate_limit_seconds():
-                wait_time = int(get_rate_limit_seconds() - (current_time - last_time))
-                bot.send_message(chat_id, get_message("rate_limit_wait", lang).format(seconds=wait_time))
+            premium_user_id = step_data.get('premium_user_id')
+            try:
+                days = int(text.strip())
+                set_premium_status(premium_user_id, True, expire_days=days if days > 0 else None)
+                bot.send_message(chat_id, get_message("premium_expire_success", lang))
+                if chat_id in user_data:
+                    msg_id = user_data[chat_id].get('message_id')
+                    if msg_id:
+                        try:
+                            bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+                        except:
+                            pass
+                show_premium_user_settings(bot, chat_id, premium_user_id, None, user_id)
+            except ValueError:
+                bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
+            if chat_id in user_data:
+                del user_data[chat_id]
+            if hasattr(bot, 'user_data') and chat_id in bot.user_data:
+                del bot.user_data[chat_id]
+            return
+        
+        elif step == 'premium_quota':
+            if not is_owner(user_id) and not has_permission(user_id, "can_manage_premium"):
+                bot.send_message(chat_id, get_message("admin_no_permission", lang))
                 return
-        # دانلود
-        msg = bot.send_message(chat_id, get_message("downloading", lang))
-        try:
-            files, error = download_instagram_post(text, user_id)
-            if files:
-                for f in files:
+            premium_user_id = step_data.get('premium_user_id')
+            try:
+                quota = int(text.strip())
+                set_premium_status(premium_user_id, True, daily_quota=quota)
+                bot.send_message(chat_id, get_message("settings_updated", lang))
+                if chat_id in user_data:
+                    msg_id = user_data[chat_id].get('message_id')
+                    if msg_id:
+                        try:
+                            bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+                        except:
+                            pass
+                show_premium_user_settings(bot, chat_id, premium_user_id, None, user_id)
+            except ValueError:
+                bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
+            if chat_id in user_data:
+                del user_data[chat_id]
+            if hasattr(bot, 'user_data') and chat_id in bot.user_data:
+                del bot.user_data[chat_id]
+            return
+        
+        elif step == 'premium_size':
+            if not is_owner(user_id) and not has_permission(user_id, "can_manage_premium"):
+                bot.send_message(chat_id, get_message("admin_no_permission", lang))
+                return
+            premium_user_id = step_data.get('premium_user_id')
+            try:
+                size = int(text.strip())
+                set_premium_status(premium_user_id, True, max_file_size=size)
+                bot.send_message(chat_id, get_message("settings_updated", lang))
+                if chat_id in user_data:
+                    msg_id = user_data[chat_id].get('message_id')
+                    if msg_id:
+                        try:
+                            bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+                        except:
+                            pass
+                show_premium_user_settings(bot, chat_id, premium_user_id, None, user_id)
+            except ValueError:
+                bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
+            if chat_id in user_data:
+                del user_data[chat_id]
+            if hasattr(bot, 'user_data') and chat_id in bot.user_data:
+                del bot.user_data[chat_id]
+            return
+        
+        elif step == 'premium_rate':
+            if not is_owner(user_id) and not has_permission(user_id, "can_manage_premium"):
+                bot.send_message(chat_id, get_message("admin_no_permission", lang))
+                return
+            premium_user_id = step_data.get('premium_user_id')
+            try:
+                rate = int(text.strip())
+                set_premium_status(premium_user_id, True, rate_limit=rate)
+                bot.send_message(chat_id, get_message("settings_updated", lang))
+                if chat_id in user_data:
+                    msg_id = user_data[chat_id].get('message_id')
+                    if msg_id:
+                        try:
+                            bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+                        except:
+                            pass
+                show_premium_user_settings(bot, chat_id, premium_user_id, None, user_id)
+            except ValueError:
+                bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
+            if chat_id in user_data:
+                del user_data[chat_id]
+            if hasattr(bot, 'user_data') and chat_id in bot.user_data:
+                del bot.user_data[chat_id]
+            return
+        
+        # ===== تنظیمات عمومی =====
+        elif step == 'set_daily_quota':
+            if not is_owner(user_id) and not has_permission(user_id, "can_manage_settings"):
+                bot.send_message(chat_id, get_message("admin_no_permission", lang))
+                return
+            try:
+                quota = int(text.strip())
+                set_setting("daily_quota", str(quota))
+                bot.send_message(chat_id, get_message("settings_updated", lang))
+                if chat_id in user_data:
+                    msg_id = user_data[chat_id].get('message_id')
+                    if msg_id:
+                        try:
+                            bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+                        except:
+                            pass
+                show_settings(bot, chat_id)
+            except ValueError:
+                bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
+            if chat_id in user_data:
+                del user_data[chat_id]
+            if hasattr(bot, 'user_data') and chat_id in bot.user_data:
+                del bot.user_data[chat_id]
+            return
+        
+        elif step == 'set_max_file_size':
+            if not is_owner(user_id) and not has_permission(user_id, "can_manage_settings"):
+                bot.send_message(chat_id, get_message("admin_no_permission", lang))
+                return
+            try:
+                size = int(text.strip())
+                set_setting("max_file_size", str(size))
+                bot.send_message(chat_id, get_message("settings_updated", lang))
+                if chat_id in user_data:
+                    msg_id = user_data[chat_id].get('message_id')
+                    if msg_id:
+                        try:
+                            bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+                        except:
+                            pass
+                show_settings(bot, chat_id)
+            except ValueError:
+                bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
+            if chat_id in user_data:
+                del user_data[chat_id]
+            if hasattr(bot, 'user_data') and chat_id in bot.user_data:
+                del bot.user_data[chat_id]
+            return
+        
+        # ===== اضافه کردن کانال اجباری =====
+        elif step == 'add_force_channel':
+            if not is_owner(user_id) and not has_permission(user_id, "can_manage_force_sub"):
+                bot.send_message(chat_id, get_message("admin_no_permission", lang))
+                return
+            channel = text.strip()
+            if not channel.startswith('@'):
+                bot.send_message(chat_id, "❌ لطفاً آیدی کانال را با @ شروع کنید!")
+                return
+            add_force_channel(channel)
+            bot.send_message(chat_id, f"✅ کانال {channel} به لیست اضافه شد.")
+            if chat_id in user_data:
+                msg_id = user_data[chat_id].get('message_id')
+                if msg_id:
                     try:
-                        if f.endswith('.mp4'):
-                            with open(f, 'rb') as video:
-                                bot.send_video(chat_id, video, caption="✅ دانلود شد!")
-                        else:
-                            with open(f, 'rb') as img:
-                                bot.send_photo(chat_id, img, caption="✅ دانلود شد!")
-                        os.remove(f)
-                    except Exception as e:
-                        logging.error(f"Error sending file: {e}")
-                        bot.send_message(chat_id, f"❌ خطا در ارسال فایل: {e}")
-                if user_last_download is not None:
-                    user_last_download[user_id] = time.time()
-                bot.delete_message(chat_id, msg.message_id)
+                        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+                    except:
+                        pass
+            show_force_sub_settings(bot, chat_id)
+            if chat_id in user_data:
+                del user_data[chat_id]
+            if hasattr(bot, 'user_data') and chat_id in bot.user_data:
+                del bot.user_data[chat_id]
+            return
+        
+        # ===== ارسال همگانی =====
+        elif step == 'broadcast':
+            process_broadcast_message(bot, message, user_data)
+            return
+        
+        # ===================================================
+        # ===== پردازش معمولی (لینک یا دستور) =====
+        # ===================================================
+        
+        if text.startswith('/'):
+            # دستورات جداگانه در app.py پردازش می‌شوند
+            # اما اگر اینجا رسید، یعنی دستوری که شناخته نشده
+            if text == '/start':
+                send_welcome_message(bot, chat_id, user_id, lang)
+            elif text == '/help':
+                bot.send_message(chat_id, get_message("help", lang))
+            elif text == '/language':
+                keyboard = get_language_keyboard()
+                bot.send_message(chat_id, get_message("select_language", lang), reply_markup=keyboard)
+            elif text == '/admin' and is_admin(user_id):
+                keyboard = get_admin_inline_keyboard(lang)
+                bot.send_message(chat_id, get_message("admin_welcome", lang), reply_markup=keyboard, parse_mode='HTML')
             else:
-                bot.edit_message_text(f"❌ خطا: {error}", chat_id, msg.message_id)
-        except Exception as e:
-            logging.error(f"Download error: {e}")
-            bot.edit_message_text(f"❌ خطا: {e}", chat_id, msg.message_id)
-    else:
-        # پیام معمولی
-        if is_admin(user_id):
-            keyboard = get_admin_keyboard(lang)
-            bot.send_message(chat_id, get_message("admin_welcome", lang), reply_markup=keyboard)
+                bot.send_message(chat_id, get_message("unknown_command", lang))
+        
+        elif text.startswith('http://') or text.startswith('https://'):
+            # ===== دانلود =====
+            # بررسی فعال بودن ربات
+            if get_setting("is_active", "True") != "True":
+                bot.send_message(chat_id, get_message("bot_inactive", lang))
+                return
+            
+            # بررسی سقف دانلود
+            if not is_admin(user_id):
+                try:
+                    daily_quota = get_user_daily_quota(user_id)
+                    if daily_quota is not None and daily_quota <= 0:
+                        bot.send_message(chat_id, get_message("daily_quota_reached", lang))
+                        return
+                except:
+                    pass  # اگر خطا بود، نادیده بگیر
+            
+            # محدودیت زمانی
+            if get_rate_limit_enabled() and not is_admin(user_id):
+                if user_last_download is not None:
+                    last_time = user_last_download.get(user_id, 0)
+                    current_time = time.time()
+                    wait_seconds = get_rate_limit_seconds()
+                    if current_time - last_time < wait_seconds:
+                        wait_time = int(wait_seconds - (current_time - last_time))
+                        bot.send_message(chat_id, get_message("rate_limit_wait", lang).format(seconds=wait_time))
+                        return
+            
+            # دانلود
+            msg = bot.send_message(chat_id, get_message("downloading", lang))
+            try:
+                files, error = download_instagram_post(text, user_id)
+                if files:
+                    for f in files:
+                        try:
+                            if f.endswith('.mp4'):
+                                with open(f, 'rb') as video:
+                                    bot.send_video(chat_id, video, caption="✅ دانلود شد!")
+                            else:
+                                with open(f, 'rb') as img:
+                                    bot.send_photo(chat_id, img, caption="✅ دانلود شد!")
+                            os.remove(f)
+                        except Exception as e:
+                            logging.error(f"Error sending file: {e}")
+                            bot.send_message(chat_id, f"❌ خطا در ارسال فایل: {e}")
+                    if user_last_download is not None:
+                        user_last_download[user_id] = time.time()
+                    bot.delete_message(chat_id, msg.message_id)
+                else:
+                    bot.edit_message_text(f"❌ خطا: {error}", chat_id, msg.message_id)
+            except Exception as e:
+                logging.error(f"Download error: {e}")
+                bot.edit_message_text(f"❌ خطا: {e}", chat_id, msg.message_id)
+        
         else:
-            keyboard = get_user_keyboard()
-            bot.send_message(chat_id, get_message("start", lang), reply_markup=keyboard)
+            # پیام معمولی (نه دستور و نه لینک)
+            if is_admin(user_id):
+                keyboard = get_admin_keyboard(lang)
+                bot.send_message(chat_id, get_message("admin_welcome", lang), reply_markup=keyboard)
+            else:
+                keyboard = get_user_keyboard()
+                bot.send_message(chat_id, get_message("start", lang), reply_markup=keyboard)
+    
+    except Exception as e:
+        # ===== خطای کلی =====
+        logging.error(f"🔥 CRITICAL ERROR in handle_message: {e}", exc_info=True)
+        try:
+            bot.send_message(chat_id, "⚠️ خطای داخلی رخ داد. لطفاً دوباره تلاش کنید.")
+        except:
+            pass

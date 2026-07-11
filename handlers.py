@@ -308,6 +308,7 @@ def process_broadcast_message(bot, message):
     broadcast_text = message.text
     lang = get_user_language(chat_id) or "fa"
     
+    # حذف پیام پرامپت قبلی
     try:
         if chat_id in bot.user_data and 'message_id' in bot.user_data[chat_id]:
             bot.delete_message(chat_id, bot.user_data[chat_id]['message_id'])
@@ -822,8 +823,12 @@ def handle_callback_query(bot, call, user_data):
                 parse_mode='HTML'
             )
         except Exception as e:
+            # اگر خطا خورد، پیام رو پاک کن و جدید بفرست
             logging.warning(f"Editing message failed, sending new one: {e}")
-            bot.delete_message(chat_id, message_id)
+            try:
+                bot.delete_message(chat_id, message_id)
+            except:
+                pass
             keyboard = get_admin_inline_keyboard(lang)
             bot.send_message(
                 chat_id,

@@ -8,16 +8,18 @@ MESSAGES_FA = {
 
 لینک مدنظر خود را جهت دانلود بفرستید.
 
-📸 Instagram | 🐦 X | 📱 TikTok | 📌 Pinterest
-📷 Snapchat | 🌐 Facebook | 🎧 SoundCloud
-💬 Threads | 🔗 Reddit | 🎥 Likee""",
+📸 Instagram | 🐦 X (Twitter) | 📱 TikTok | 📌 Pinterest
+📷 Snapchat | 🌐 Facebook | 🎧 SoundCloud | 💬 Threads
+🔗 Reddit | 🎥 Likee | 🎵 Spotify | ▶️ YouTube
+
+ارسال لینک از هر کدام از این پلتفرم‌ها کافیه!""",
     "lang_selection": "🌍 لطفاً زبان مورد نظر خود را انتخاب کنید:\nPlease select your language:",
     "lang_changed": "✅ زبان با موفقیت به فارسی تغییر کرد.",
     "lang_changed_en": "✅ Language changed to English successfully.",
     "lang_prompt": "🌍 برای تغییر زبان، روی دکمه زیر کلیک کنید:",
     "downloading": "⏳ دانلود...",
-    "invalid_link": "❌ لطفاً یه لینک معتبر اینستاگرام بفرست.",
-    "download_failed": "❌ دانلود نشد. پست ممکنه خصوصی یا حذف شده باشه.",
+    "invalid_link": "❌ لطفاً یه لینک معتبر ارسال کنید.",
+    "download_failed": "❌ دانلود نشد. لینک ممکنه خراب یا خصوصی باشه.",
     "send_error": "❌ خطا در ارسال فایل: {error}",
     "caption": "🤍Downloaded by @iBBDownloaderBot",
     "admin_welcome": "🛠 به پنل مدیریت خوش آمدید.\nلطفاً یکی از گزینه‌ها را انتخاب کنید:",
@@ -141,23 +143,27 @@ _________________
     "premium_not_found": "❌ کاربر ویژه پیدا نشد.",
     "premium_remove_success": "❌ کاربر از لیست ویژه حذف شد.",
     "premium_add_prompt": "👤 آیدی عددی کاربر را برای افزودن به ویژه وارد کنید:",
+    # ===== Report =====
+    "report_title": "📋 گزارش روزانه ربات",
 }
 
 MESSAGES_EN = {
     "start": """🎬 Welcome to Downloader Bot!
 
-Send your Instagram link to download.
+Send your link from any platform below:
 
-📸 Instagram | 🐦 X | 📱 TikTok | 📌 Pinterest
-📷 Snapchat | 🌐 Facebook | 🎧 SoundCloud
-💬 Threads | 🔗 Reddit | 🎥 Likee""",
+📸 Instagram | 🐦 X (Twitter) | 📱 TikTok | 📌 Pinterest
+📷 Snapchat | 🌐 Facebook | 🎧 SoundCloud | 💬 Threads
+🔗 Reddit | 🎥 Likee | 🎵 Spotify | ▶️ YouTube
+
+Just paste the link and I'll download it!""",
     "lang_selection": "🌍 Please select your language:\nلطفاً زبان مورد نظر خود را انتخاب کنید:",
     "lang_changed": "✅ Language changed to Persian successfully.",
     "lang_changed_en": "✅ Language changed to English successfully.",
     "lang_prompt": "🌍 To change language, click the button below:",
     "downloading": "⏳ Downloading...",
-    "invalid_link": "❌ Please send a valid Instagram link.",
-    "download_failed": "❌ Download failed. Post might be private or deleted.",
+    "invalid_link": "❌ Please send a valid link.",
+    "download_failed": "❌ Download failed. Link might be broken or private.",
     "send_error": "❌ Error sending file: {error}",
     "caption": "🤍Downloaded by @iBBDownloaderBot",
     "admin_welcome": "🛠 Welcome to Admin Panel.\nPlease select an option:",
@@ -256,7 +262,6 @@ Click buttons below to change:""",
 📥 Downloads Today: {today_downloads}
 ❌ Errors Today: {errors}
 """,
-    # ===== Premium Users =====
     "premium_users_list": """👑 <b>Premium Users</b>
 
 {users}
@@ -281,6 +286,7 @@ _________________
     "premium_not_found": "❌ Premium user not found.",
     "premium_remove_success": "❌ User removed from premium list.",
     "premium_add_prompt": "👤 Enter user ID to add as premium:",
+    "report_title": "📋 Daily Bot Report",
 }
 
 # ===================================================
@@ -300,19 +306,21 @@ def get_admin_keyboard(lang: str = "fa"):
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     if lang == "en":
         btn_stats = KeyboardButton("📊 Statistics")
+        btn_report = KeyboardButton("📋 Daily Report")
         btn_broadcast = KeyboardButton("📨 Broadcast")
         btn_force_sub = KeyboardButton("🔒 Force Subscribe")
         btn_users = KeyboardButton("👥 Users & Admins")
         btn_settings = KeyboardButton("⚙️ Settings")
     else:
         btn_stats = KeyboardButton("📊 آمار ربات")
+        btn_report = KeyboardButton("📋 گزارش روزانه")
         btn_broadcast = KeyboardButton("📨 ارسال همگانی")
         btn_force_sub = KeyboardButton("🔒 قفل اسپانسر")
         btn_users = KeyboardButton("👥 مدیریت کاربران و ادمین‌ها")
         btn_settings = KeyboardButton("⚙️ تنظیمات ربات")
-    keyboard.add(btn_stats, btn_broadcast)
-    keyboard.add(btn_force_sub, btn_users)
-    keyboard.add(btn_settings)
+    keyboard.add(btn_stats, btn_report)
+    keyboard.add(btn_broadcast, btn_force_sub)
+    keyboard.add(btn_users, btn_settings)
     return keyboard
 
 def get_user_keyboard():
@@ -325,6 +333,7 @@ def get_admin_inline_keyboard(lang: str = "fa"):
     keyboard = InlineKeyboardMarkup(row_width=2)
     if lang == "en":
         btn_stats = InlineKeyboardButton("📊 Statistics", callback_data="admin_stats")
+        btn_report = InlineKeyboardButton("📋 Report", callback_data="admin_report")
         btn_broadcast = InlineKeyboardButton("📨 Broadcast", callback_data="admin_broadcast")
         btn_force_sub = InlineKeyboardButton("🔒 Force Subscribe", callback_data="admin_force_sub")
         btn_users = InlineKeyboardButton("👥 Users & Admins", callback_data="admin_admins")
@@ -332,14 +341,15 @@ def get_admin_inline_keyboard(lang: str = "fa"):
         btn_close = InlineKeyboardButton("❌ Close", callback_data="admin_close")
     else:
         btn_stats = InlineKeyboardButton("📊 آمار", callback_data="admin_stats")
+        btn_report = InlineKeyboardButton("📋 گزارش", callback_data="admin_report")
         btn_broadcast = InlineKeyboardButton("📨 ارسال همگانی", callback_data="admin_broadcast")
         btn_force_sub = InlineKeyboardButton("🔒 قفل اسپانسر", callback_data="admin_force_sub")
         btn_users = InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin_admins")
         btn_settings = InlineKeyboardButton("⚙️ تنظیمات", callback_data="admin_settings")
         btn_close = InlineKeyboardButton("❌ بستن", callback_data="admin_close")
-    keyboard.add(btn_stats, btn_broadcast)
-    keyboard.add(btn_force_sub, btn_users)
-    keyboard.add(btn_settings)
+    keyboard.add(btn_stats, btn_report)
+    keyboard.add(btn_broadcast, btn_force_sub)
+    keyboard.add(btn_users, btn_settings)
     keyboard.add(btn_close)
     return keyboard
 
@@ -357,6 +367,18 @@ def get_stats_refresh_keyboard(lang: str = "fa"):
         btn_back = InlineKeyboardButton("🔙 Back", callback_data="admin_back")
     else:
         btn_refresh = InlineKeyboardButton("🔄 بروزرسانی", callback_data="refresh_stats")
+        btn_back = InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")
+    keyboard.add(btn_refresh)
+    keyboard.add(btn_back)
+    return keyboard
+
+def get_report_keyboard(lang: str = "fa"):
+    keyboard = InlineKeyboardMarkup()
+    if lang == "en":
+        btn_refresh = InlineKeyboardButton("🔄 Refresh", callback_data="refresh_report")
+        btn_back = InlineKeyboardButton("🔙 Back", callback_data="admin_back")
+    else:
+        btn_refresh = InlineKeyboardButton("🔄 بروزرسانی", callback_data="refresh_report")
         btn_back = InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")
     keyboard.add(btn_refresh)
     keyboard.add(btn_back)
@@ -479,7 +501,7 @@ def get_cancel_keyboard(lang: str = "fa"):
     return keyboard
 
 # ===================================================
-# 🆕 دکمه‌های مدیریت دسترسی ادمین (با مدیریت ویژه)
+# 🆕 دکمه‌های مدیریت دسترسی ادمین
 # ===================================================
 def get_admin_permissions_keyboard(admin_user_id, permissions, is_owner=False, lang: str = "fa"):
     keyboard = InlineKeyboardMarkup(row_width=2)
@@ -519,10 +541,9 @@ def get_admin_permissions_keyboard(admin_user_id, permissions, is_owner=False, l
     return keyboard
 
 # ===================================================
-# 🆕 دکمه‌های تنظیمات کاربر ویژه (با گزینه‌های مدیریت)
+# 🆕 دکمه‌های تنظیمات کاربر ویژه
 # ===================================================
 def get_premium_user_settings_keyboard(user_id, settings, lang: str = "fa"):
-    """کیبورد مدیریت تنظیمات کاربر ویژه"""
     keyboard = InlineKeyboardMarkup(row_width=2)
     if lang == "en":
         toggle_label = "🔄 Toggle Status"
@@ -532,7 +553,6 @@ def get_premium_user_settings_keyboard(user_id, settings, lang: str = "fa"):
         rate_label = "⏱️ Set Rate Limit"
         remove_label = "❌ Remove Premium"
         back_label = "🔙 Back to List"
-        forever_label = "♾️ Forever"
     else:
         toggle_label = "🔄 تغییر وضعیت"
         expire_label = "📆 تنظیم تاریخ انقضا"
@@ -541,20 +561,13 @@ def get_premium_user_settings_keyboard(user_id, settings, lang: str = "fa"):
         rate_label = "⏱️ محدودیت زمانی"
         remove_label = "❌ حذف ویژه"
         back_label = "🔙 بازگشت به لیست"
-    # وضعیت فعلی
     status = "🟢 فعال" if settings.get('is_premium') else "🔴 غیرفعال"
     keyboard.add(InlineKeyboardButton(f"{toggle_label} ({status})", callback_data=f"premium_toggle_{user_id}"))
-    # تاریخ انقضا
     keyboard.add(InlineKeyboardButton(expire_label, callback_data=f"premium_expire_{user_id}"))
-    # سقف دانلود
     keyboard.add(InlineKeyboardButton(quota_label, callback_data=f"premium_quota_{user_id}"))
-    # حجم فایل
     keyboard.add(InlineKeyboardButton(size_label, callback_data=f"premium_size_{user_id}"))
-    # محدودیت زمانی
     keyboard.add(InlineKeyboardButton(rate_label, callback_data=f"premium_rate_{user_id}"))
-    # حذف ویژه
     keyboard.add(InlineKeyboardButton(remove_label, callback_data=f"premium_remove_{user_id}"))
-    # بازگشت
     keyboard.add(InlineKeyboardButton(back_label, callback_data="premium_list_back"))
     return keyboard
 
@@ -563,7 +576,6 @@ def get_premium_user_settings_keyboard(user_id, settings, lang: str = "fa"):
 # ===================================================
 def get_settings_new_keyboard(lang: str = "fa", daily_quota: str = "10", max_file_size: str = "50", is_active: bool = True, rate_limit_enabled: bool = False, rate_limit_seconds: int = 30):
     keyboard = InlineKeyboardMarkup(row_width=2)
-    # وضعیت ربات (کل عرض)
     if lang == "en":
         status_text = "🟢 Active" if is_active else "🔴 Inactive"
         btn_status = InlineKeyboardButton(f"Bot Status: {status_text}", callback_data="setting_toggle_active")
@@ -571,7 +583,6 @@ def get_settings_new_keyboard(lang: str = "fa", daily_quota: str = "10", max_fil
         status_text = "🟢 فعال" if is_active else "🔴 غیرفعال"
         btn_status = InlineKeyboardButton(f"وضعیت ربات: {status_text}", callback_data="setting_toggle_active")
     keyboard.add(btn_status)
-    # سقف دانلود: مقدار در چپ (قابل کلیک)، برچسب در راست
     if lang == "en":
         btn_quota_value = InlineKeyboardButton(daily_quota, callback_data="setting_quota")
         btn_quota_label = InlineKeyboardButton("📊 Daily Quota", callback_data="dummy")
@@ -579,7 +590,6 @@ def get_settings_new_keyboard(lang: str = "fa", daily_quota: str = "10", max_fil
         btn_quota_value = InlineKeyboardButton(daily_quota, callback_data="setting_quota")
         btn_quota_label = InlineKeyboardButton("📊 سقف دانلود", callback_data="dummy")
     keyboard.add(btn_quota_value, btn_quota_label)
-    # حجم فایل: مقدار در چپ (قابل کلیک)، برچسب در راست
     if lang == "en":
         btn_size_value = InlineKeyboardButton(f"{max_file_size} MB", callback_data="setting_size")
         btn_size_label = InlineKeyboardButton("📦 Max File Size", callback_data="dummy")
@@ -587,7 +597,6 @@ def get_settings_new_keyboard(lang: str = "fa", daily_quota: str = "10", max_fil
         btn_size_value = InlineKeyboardButton(f"{max_file_size} MB", callback_data="setting_size")
         btn_size_label = InlineKeyboardButton("📦 حجم فایل", callback_data="dummy")
     keyboard.add(btn_size_value, btn_size_label)
-    # محدودیت زمانی: مقدار در چپ (قابل کلیک)، برچسب در راست
     if lang == "en":
         rate_status = "✅ On" if rate_limit_enabled else "❌ Off"
         btn_rate_value = InlineKeyboardButton(f"{rate_limit_seconds}s ({rate_status})", callback_data="setting_rate_limit")
@@ -597,7 +606,6 @@ def get_settings_new_keyboard(lang: str = "fa", daily_quota: str = "10", max_fil
         btn_rate_value = InlineKeyboardButton(f"{rate_limit_seconds}s ({rate_status})", callback_data="setting_rate_limit")
         btn_rate_label = InlineKeyboardButton("⏱️ محدودیت زمانی", callback_data="dummy")
     keyboard.add(btn_rate_value, btn_rate_label)
-    # دکمه بازگشت (کل عرض)
     if lang == "en":
         btn_back = InlineKeyboardButton("🔙 Back", callback_data="admin_back")
     else:

@@ -19,6 +19,7 @@ from messages import (
     get_rate_limit_keyboard, get_admin_permissions_keyboard,
     get_admin_inline_keyboard, get_language_keyboard,
     get_premium_list_inline_keyboard, get_premium_user_settings_keyboard,
+    get_cancel_keyboard,
     COMMANDS_FA, COMMANDS_EN
 )
 from database import (
@@ -35,7 +36,7 @@ from database import (
     set_premium_status, remove_premium_user, get_premium_user_details,
     is_premium_user, get_user_daily_quota, get_user_max_file_size,
     get_user_rate_limit, is_user_exempt_from_force_subscribe,
-    set_admin_expire, is_admin_expired, get_user
+    set_admin_expire, is_admin_expired, check_quota
 )
 
 OWNER_ID = 1085150385
@@ -523,6 +524,31 @@ def handle_callback_query(bot, call, user_data):
         bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
         send_welcome_message(bot, chat_id, user_id, "en")
         return
+    # ===== دکمه لغو =====
+    elif data == "cancel_action":
+        lang = get_user_language(user_id) or "fa"
+        bot.answer_callback_query(call.id, "❌ عملیات لغو شد.", show_alert=True)
+        if chat_id in user_data:
+            msg_id = user_data[chat_id].get('message_id')
+            if msg_id:
+                try:
+                    bot.delete_message(chat_id, msg_id)
+                except:
+                    pass
+            del user_data[chat_id]
+        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
+            del bot.user_data[chat_id]
+        bot.send_message(chat_id, get_message("broadcast_cancelled", lang))
+        return
+    # ===== جابجایی بین لیست ادمین‌ها و ویژه =====
+    elif data == "switch_to_premium":
+        bot.answer_callback_query(call.id, "👑 کاربران ویژه", show_alert=False)
+        show_premium_users(bot, chat_id, message_id, user_id)
+        return
+    elif data == "switch_to_admins":
+        bot.answer_callback_query(call.id, "📋 ادمین‌ها", show_alert=False)
+        show_admin_list(bot, chat_id, message_id, user_id)
+        return
     # ===== بقیه عملیات فقط برای ادمین‌ها =====
     if not is_admin(user_id):
         bot.answer_callback_query(call.id, "⛔ شما دسترسی ادمین ندارید!", show_alert=True)
@@ -542,7 +568,7 @@ def handle_callback_query(bot, call, user_data):
         show_force_sub_settings(bot, chat_id, message_id)
         return
     elif data == "admin_admins":
-        bot.answer_callback_query(call.id, "📋 مدیریت ادمین‌ها", show_alert=False)
+        bot.answer_callback_query(call.id, "📋 مدیریت کاربران", show_alert=False)
         show_admin_list(bot, chat_id, message_id, user_id)
         return
     elif data == "admin_premium":
@@ -573,7 +599,7 @@ def handle_callback_query(bot, call, user_data):
             return
         bot.answer_callback_query(call.id, "➕ لطفاً آیدی عددی را وارد کنید", show_alert=False)
         bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
-        msg = bot.send_message(chat_id, get_message("admin_add_prompt", lang))
+        msg = bot.send_message(chat_id, get_message("admin_add_prompt", lang), reply_markup=get_cancel_keyboard(lang))
         user_data[chat_id] = {'step': 'add_admin', 'message_id': msg.message_id}
         return
     elif data.startswith("admin_view_"):
@@ -651,7 +677,7 @@ def handle_callback_query(bot, call, user_data):
             return
         bot.answer_callback_query(call.id, "➕ آیدی کاربر جدید را برای افزودن به ویژه وارد کنید:", show_alert=False)
         bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
-        msg = bot.send_message(chat_id, "👤 آیدی عددی کاربر را وارد کنید:")
+        msg = bot.send_message(chat_id, get_message("premium_add_prompt", lang), reply_markup=get_cancel_keyboard(lang))
         user_data[chat_id] = {'step': 'add_premium', 'message_id': msg.message_id}
         return
     elif data.startswith("premium_view_"):
@@ -945,7 +971,7 @@ def handle_callback_query(bot, call, user_data):
                 parse_mode='HTML'
             )
         return
-    # ===== dummy برای دکمه‌های غیرفعال =====
+    # ===== dummy =====
     elif data == "dummy":
         bot.answer_callback_query(call.id, "ℹ️ این دکمه فقط برای نمایش است.", show_alert=False)
         return
@@ -994,6 +1020,14 @@ def handle_message(bot, message, user_data, user_last_download=None):
             else:
                 add_admin(new_admin_id, "moderator")
                 bot.send_message(chat_id, get_message("admin_add_success", lang).format(role="moderator"))
+                # حذف کیبورد لغو
+                if chat_id in user_data:
+                    msg_id = user_data[chat_id].get('message_id')
+                    if msg_id:
+                        try:
+                            bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+                        except:
+                            pass
                 show_admin_list(bot, chat_id, None, user_id)
         except ValueError:
             bot.send_message(chat_id, get_message("admin_invalid_id", lang))
@@ -1011,6 +1045,14 @@ def handle_message(bot, message, user_data, user_last_download=None):
             days = int(text.strip())
             set_admin_expire(admin_id, days if days > 0 else None)
             bot.send_message(chat_id, get_message("premium_expire_success", lang))
+            # حذف کیبورد لغو
+            if chat_id in user_data:
+                msg_id = user_data[chat_id].get('message_id')
+                if msg_id:
+                    try:
+                        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+                    except:
+                        pass
             show_admin_permissions(bot, chat_id, admin_id, None, user_id)
         except ValueError:
             bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
@@ -1026,13 +1068,20 @@ def handle_message(bot, message, user_data, user_last_download=None):
             return
         try:
             premium_user_id = int(text.strip())
-            # بررسی وجود کاربر
             user_info = get_user(premium_user_id)
             if not user_info:
                 bot.send_message(chat_id, "❌ کاربر پیدا نشد!")
                 return
             set_premium_status(premium_user_id, True)
             bot.send_message(chat_id, f"✅ کاربر {premium_user_id} به ویژه اضافه شد.")
+            # حذف کیبورد لغو
+            if chat_id in user_data:
+                msg_id = user_data[chat_id].get('message_id')
+                if msg_id:
+                    try:
+                        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+                    except:
+                        pass
             show_premium_users(bot, chat_id, None, user_id)
         except ValueError:
             bot.send_message(chat_id, "❌ آیدی وارد شده معتبر نیست!")
@@ -1050,6 +1099,13 @@ def handle_message(bot, message, user_data, user_last_download=None):
             days = int(text.strip())
             set_premium_status(premium_user_id, True, expire_days=days if days > 0 else None)
             bot.send_message(chat_id, get_message("premium_expire_success", lang))
+            if chat_id in user_data:
+                msg_id = user_data[chat_id].get('message_id')
+                if msg_id:
+                    try:
+                        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+                    except:
+                        pass
             show_premium_user_settings(bot, chat_id, premium_user_id, None, user_id)
         except ValueError:
             bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
@@ -1067,6 +1123,13 @@ def handle_message(bot, message, user_data, user_last_download=None):
             quota = int(text.strip())
             set_premium_status(premium_user_id, True, daily_quota=quota)
             bot.send_message(chat_id, get_message("settings_updated", lang))
+            if chat_id in user_data:
+                msg_id = user_data[chat_id].get('message_id')
+                if msg_id:
+                    try:
+                        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+                    except:
+                        pass
             show_premium_user_settings(bot, chat_id, premium_user_id, None, user_id)
         except ValueError:
             bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
@@ -1084,6 +1147,13 @@ def handle_message(bot, message, user_data, user_last_download=None):
             size = int(text.strip())
             set_premium_status(premium_user_id, True, max_file_size=size)
             bot.send_message(chat_id, get_message("settings_updated", lang))
+            if chat_id in user_data:
+                msg_id = user_data[chat_id].get('message_id')
+                if msg_id:
+                    try:
+                        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+                    except:
+                        pass
             show_premium_user_settings(bot, chat_id, premium_user_id, None, user_id)
         except ValueError:
             bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
@@ -1101,6 +1171,13 @@ def handle_message(bot, message, user_data, user_last_download=None):
             rate = int(text.strip())
             set_premium_status(premium_user_id, True, rate_limit=rate)
             bot.send_message(chat_id, get_message("settings_updated", lang))
+            if chat_id in user_data:
+                msg_id = user_data[chat_id].get('message_id')
+                if msg_id:
+                    try:
+                        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+                    except:
+                        pass
             show_premium_user_settings(bot, chat_id, premium_user_id, None, user_id)
         except ValueError:
             bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
@@ -1118,6 +1195,13 @@ def handle_message(bot, message, user_data, user_last_download=None):
             value = int(text.strip())
             set_setting("daily_quota", str(value))
             bot.send_message(chat_id, get_message("settings_updated", lang))
+            if chat_id in user_data:
+                msg_id = user_data[chat_id].get('message_id')
+                if msg_id:
+                    try:
+                        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+                    except:
+                        pass
             show_settings(bot, chat_id)
         except ValueError:
             bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
@@ -1134,6 +1218,13 @@ def handle_message(bot, message, user_data, user_last_download=None):
             value = int(text.strip())
             set_setting("max_file_size", str(value))
             bot.send_message(chat_id, get_message("settings_updated", lang))
+            if chat_id in user_data:
+                msg_id = user_data[chat_id].get('message_id')
+                if msg_id:
+                    try:
+                        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+                    except:
+                        pass
             show_settings(bot, chat_id)
         except ValueError:
             bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
@@ -1151,6 +1242,13 @@ def handle_message(bot, message, user_data, user_last_download=None):
             channel = f"@{channel}"
         add_force_channel(channel)
         bot.send_message(chat_id, get_message("force_sub_added", lang).format(channel=channel))
+        if chat_id in user_data:
+            msg_id = user_data[chat_id].get('message_id')
+            if msg_id:
+                try:
+                    bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+                except:
+                    pass
         show_force_sub_settings(bot, chat_id)
         if chat_id in user_data:
             del user_data[chat_id]
@@ -1193,17 +1291,11 @@ def handle_message(bot, message, user_data, user_last_download=None):
                 return
             show_force_sub_settings(bot, chat_id)
             return
-        elif text == "📋 مدیریت ادمین‌ها" or text == "📋 Manage Admins":
+        elif text == "👥 مدیریت کاربران و ادمین‌ها" or text == "👥 Users & Admins":
             if not is_owner(user_id) and not has_permission(user_id, "can_manage_admins"):
                 bot.send_message(chat_id, get_message("admin_no_permission", lang))
                 return
             show_admin_list(bot, chat_id, None, user_id)
-            return
-        elif text == "👑 کاربران ویژه" or text == "👑 Premium Users":
-            if not is_owner(user_id) and not has_permission(user_id, "can_manage_premium"):
-                bot.send_message(chat_id, get_message("admin_no_permission", lang))
-                return
-            show_premium_users(bot, chat_id, None, user_id)
             return
         elif text == "⚙️ تنظیمات ربات" or text == "⚙️ Settings":
             if not is_owner(user_id) and not has_permission(user_id, "can_manage_settings"):
@@ -1213,7 +1305,6 @@ def handle_message(bot, message, user_data, user_last_download=None):
             return
     # ===== لینک اینستاگرام =====
     if text and 'instagram.com' in text:
-        # بررسی محدودیت زمانی با در نظر گرفتن تنظیمات ویژه کاربر
         rate_limit_seconds = get_user_rate_limit(user_id)
         if rate_limit_seconds > 0:
             if user_last_download is not None:
@@ -1226,8 +1317,7 @@ def handle_message(bot, message, user_data, user_last_download=None):
                         get_message("rate_limit_wait", lang).format(seconds=rate_limit_seconds, remaining=remaining)
                     )
                     return
-        # بررسی سقف دانلود روزانه با در نظر گرفتن تنظیمات ویژه
-        allowed, used, limit = check_quota(user_id)  # تابع check_quota از database.py
+        allowed, used, limit = check_quota(user_id)
         if not allowed:
             bot.send_message(
                 chat_id,

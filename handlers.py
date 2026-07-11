@@ -5,7 +5,7 @@ import os
 import requests
 import yt_dlp
 import threading
-from telebot.types import MenuButtonCommands  # <-- اضافه شد
+from telebot.types import MenuButtonCommands, InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import is_admin, DOWNLOAD_DIR
 from messages import (
@@ -443,6 +443,11 @@ def handle_callback_query(bot, call, user_data):
     
     logging.info(f"📞 Callback: {data} from {user_id}")
     
+    # ===== دکمه‌های نمایشی (dummy) =====
+    if data == "dummy":
+        bot.answer_callback_query(call.id, "ℹ️ این دکمه فقط برای نمایش است.", show_alert=False)
+        return
+    
     # ===== انتخاب زبان (برای همه کاربران) =====
     if data == "lang_fa":
         set_user_language(user_id, "fa")
@@ -451,7 +456,6 @@ def handle_callback_query(bot, call, user_data):
         # ===== تغییر کامندهای منو به فارسی =====
         try:
             bot.set_my_commands(COMMANDS_FA)
-            # ===== تنظیم دکمه‌ی منو برای این کاربر خاص =====
             bot.set_chat_menu_button(chat_id, menu_button=MenuButtonCommands())
             logging.info("✅ کامندها به فارسی تغییر کرد و دکمه‌ی منو تنظیم شد")
         except Exception as e:
@@ -460,23 +464,31 @@ def handle_callback_query(bot, call, user_data):
         bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
         lang = "fa"
         
-        # ===== نمایش دکمه‌های جدید با زبان فارسی =====
+        # ===== ساخت کیبورد شیشه‌ای با کامندها (به زبان فارسی) =====
+        keyboard = InlineKeyboardMarkup(row_width=1)
+        btn_start = InlineKeyboardButton("🚀 /start - شروع", callback_data="dummy")
+        btn_lang = InlineKeyboardButton("🌍 /language - تغییر زبان", callback_data="dummy")
         if is_admin(user_id):
-            keyboard = get_admin_keyboard(lang)
-            bot.send_message(chat_id, get_message("admin_welcome", lang), reply_markup=keyboard, parse_mode='HTML')
+            btn_stats = InlineKeyboardButton("📊 /stats - آمار", callback_data="dummy")
+            btn_broadcast = InlineKeyboardButton("📨 /broadcast - همگانی", callback_data="dummy")
+            keyboard.add(btn_stats, btn_broadcast)
+        keyboard.add(btn_start, btn_lang)
+        
+        # ===== نمایش پیام با کیبورد شیشه‌ای =====
+        if is_admin(user_id):
+            bot.send_message(chat_id, get_message("admin_welcome", lang), reply_markup=get_admin_keyboard(lang), parse_mode='HTML')
+            bot.send_message(chat_id, "📋 برای دیدن لیست کامندها، روی دکمه‌های زیر کلیک کنید یا `/` را تایپ کنید.", reply_markup=keyboard)
         else:
-            keyboard = get_language_keyboard()
-            bot.send_message(chat_id, get_message("lang_selection", lang), reply_markup=keyboard, parse_mode='HTML')
+            bot.send_message(chat_id, get_message("lang_selection", lang), reply_markup=get_language_keyboard(), parse_mode='HTML')
+            bot.send_message(chat_id, "📋 برای دیدن لیست کامندها، روی دکمه‌های زیر کلیک کنید یا `/` را تایپ کنید.", reply_markup=keyboard)
         return
     
     elif data == "lang_en":
         set_user_language(user_id, "en")
         bot.answer_callback_query(call.id, MESSAGES_EN.get("lang_changed_en", "Language changed."), show_alert=True)
         
-        # ===== تغییر کامندهای منو به انگلیسی =====
         try:
             bot.set_my_commands(COMMANDS_EN)
-            # ===== تنظیم دکمه‌ی منو برای این کاربر خاص =====
             bot.set_chat_menu_button(chat_id, menu_button=MenuButtonCommands())
             logging.info("✅ Commands changed to English and menu button set")
         except Exception as e:
@@ -485,13 +497,22 @@ def handle_callback_query(bot, call, user_data):
         bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
         lang = "en"
         
-        # ===== نمایش دکمه‌های جدید با زبان انگلیسی =====
+        # ===== ساخت کیبورد شیشه‌ای با کامندها (به زبان انگلیسی) =====
+        keyboard = InlineKeyboardMarkup(row_width=1)
+        btn_start = InlineKeyboardButton("🚀 /start - Start", callback_data="dummy")
+        btn_lang = InlineKeyboardButton("🌍 /language - Change language", callback_data="dummy")
         if is_admin(user_id):
-            keyboard = get_admin_keyboard(lang)
-            bot.send_message(chat_id, get_message("admin_welcome", lang), reply_markup=keyboard, parse_mode='HTML')
+            btn_stats = InlineKeyboardButton("📊 /stats - Statistics", callback_data="dummy")
+            btn_broadcast = InlineKeyboardButton("📨 /broadcast - Broadcast", callback_data="dummy")
+            keyboard.add(btn_stats, btn_broadcast)
+        keyboard.add(btn_start, btn_lang)
+        
+        if is_admin(user_id):
+            bot.send_message(chat_id, get_message("admin_welcome", lang), reply_markup=get_admin_keyboard(lang), parse_mode='HTML')
+            bot.send_message(chat_id, "📋 To see the list of commands, click the buttons below or type `/`", reply_markup=keyboard)
         else:
-            keyboard = get_language_keyboard()
-            bot.send_message(chat_id, get_message("lang_selection", lang), reply_markup=keyboard, parse_mode='HTML')
+            bot.send_message(chat_id, get_message("lang_selection", lang), reply_markup=get_language_keyboard(), parse_mode='HTML')
+            bot.send_message(chat_id, "📋 To see the list of commands, click the buttons below or type `/`", reply_markup=keyboard)
         return
     
     # ===== بقیه عملیات فقط برای ادمین‌ها =====

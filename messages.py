@@ -14,7 +14,7 @@ MESSAGES_FA = {
     "lang_selection": "🌍 لطفاً زبان مورد نظر خود را انتخاب کنید:\nPlease select your language:",
     "lang_changed": "✅ زبان با موفقیت به فارسی تغییر کرد.",
     "lang_changed_en": "✅ Language changed to English successfully.",
-    "lang_prompt": "🌍 برای تغییر زبان، روی دکمه زیر کلیک کنید یا از کامند /language استفاده کنید:",
+    "lang_prompt": "🌍 برای تغییر زبان، روی دکمه زیر کلیک کنید:",
     "downloading": "⏳ دانلود...",
     "invalid_link": "❌ لطفاً یه لینک معتبر اینستاگرام بفرست.",
     "download_failed": "❌ دانلود نشد. پست ممکنه خصوصی یا حذف شده باشه.",
@@ -125,7 +125,7 @@ Send your Instagram link to download.
     "lang_selection": "🌍 Please select your language:\nلطفاً زبان مورد نظر خود را انتخاب کنید:",
     "lang_changed": "✅ Language changed to Persian successfully.",
     "lang_changed_en": "✅ Language changed to English successfully.",
-    "lang_prompt": "🌍 To change language, click the button below or use /language command:",
+    "lang_prompt": "🌍 To change language, click the button below:",
     "downloading": "⏳ Downloading...",
     "invalid_link": "❌ Please send a valid Instagram link.",
     "download_failed": "❌ Download failed. Post might be private or deleted.",
@@ -229,7 +229,6 @@ Click buttons below to change:""",
 # 🔧 توابع دریافت پیام بر اساس زبان
 # ===================================================
 def get_message(key: str, lang: str = "fa") -> str:
-    """دریافت پیام بر اساس زبان کاربر"""
     if lang == "en":
         return MESSAGES_EN.get(key, MESSAGES_FA.get(key, key))
     return MESSAGES_FA.get(key, key)
@@ -466,7 +465,7 @@ def get_back_keyboard(lang: str = "fa"):
     return keyboard
 
 # ===================================================
-# 📋 کامندها (این بخش رو به‌روز کردم)
+# 📋 کامندها (برای منوی ربات)
 # ===================================================
 COMMANDS_FA = [
     BotCommand("start", "شروع و نمایش راهنما"),
@@ -477,3 +476,6 @@ COMMANDS_EN = [
     BotCommand("start", "Start and show help"),
     BotCommand("language", "Change bot language"),
 ]
+
+# برای سازگاری با کدهای قبلی که از COMMANDS استفاده می‌کنند
+COMMANDS = COMMANDS_FA

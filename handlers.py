@@ -167,7 +167,7 @@ def show_stats(bot, chat_id, message_id=None):
             month=stats.get('month', 0),
             downloads=total_downloads
         )
-        keyboard = get_stats_refresh_keyboard()
+        keyboard = get_stats_refresh_keyboard(lang)
         if message_id:
             try:
                 bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)

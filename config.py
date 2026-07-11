@@ -11,13 +11,13 @@ ADMIN_IDS: List[int] = [
     if x.strip().isdigit()
 ]
 
-# ===== مسیر دیتابیس (Persistent Disk) =====
-DB_PATH = os.getenv("DB_PATH", "/data/users.db")
+# ===== مسیر دیتابیس (بدون وابستگی به /data) =====
+DB_PATH = os.getenv("DB_PATH", "users.db")  # <--- اینجا عوض شد
 DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "downloads")
 
 # ===== تنظیمات پیش‌فرض =====
 DEFAULT_SETTINGS = {
-    "welcome_message": "👋 سلام! به ربات دانلود اینستاگرام خوش آمدید.\n\nلینک پست یا ریلز اینستاگرام را بفرستید تا آن را برایتان دانلود کنم.",
+    "welcome_message": "👋 سلام! به ربات دانلود اینستاگرام خوش آمدید.",
     "daily_quota": "10",
     "max_file_size": "50",
     "is_active": "True",

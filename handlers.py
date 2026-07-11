@@ -15,7 +15,8 @@ from messages import (
     get_settings_inline_keyboard, get_force_sub_inline_keyboard,
     get_rate_limit_keyboard, get_admin_permissions_keyboard,
     get_broadcast_progress_keyboard, get_broadcast_cancel_keyboard,
-    get_admin_inline_keyboard, get_language_keyboard
+    get_admin_inline_keyboard, get_language_keyboard,
+    COMMANDS_FA, COMMANDS_EN
 )
 from database import (
     add_user, get_all_users, get_stats,
@@ -441,35 +442,51 @@ def handle_callback_query(bot, call, user_data):
     
     logging.info(f"📞 Callback: {data} from {user_id}")
     
-    # ===== انتخاب زبان (برای همه کاربران، نه فقط ادمین) =====
+    # ===== انتخاب زبان (برای همه کاربران) =====
     if data == "lang_fa":
         set_user_language(user_id, "fa")
         bot.answer_callback_query(call.id, MESSAGES_FA.get("lang_changed", "زبان تغییر کرد."), show_alert=True)
+        
+        # ===== تغییر کامندهای منو به فارسی =====
+        try:
+            bot.set_my_commands(COMMANDS_FA)
+            logging.info("✅ کامندها به فارسی تغییر کرد")
+        except Exception as e:
+            logging.error(f"❌ خطا در تغییر کامندها: {e}")
+        
         bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
-        # ارسال منوی اصلی با زبان جدید
         lang = "fa"
-        keyboard = get_language_keyboard()
-        bot.edit_message_text(
-            get_message("lang_selection", lang),
-            chat_id,
-            message_id,
-            reply_markup=keyboard,
-            parse_mode='HTML'
-        )
+        
+        # ===== نمایش دکمه‌های جدید با زبان فارسی =====
+        if is_admin(user_id):
+            keyboard = get_admin_keyboard(lang)
+            bot.send_message(chat_id, get_message("admin_welcome", lang), reply_markup=keyboard, parse_mode='HTML')
+        else:
+            keyboard = get_language_keyboard()
+            bot.send_message(chat_id, get_message("lang_selection", lang), reply_markup=keyboard, parse_mode='HTML')
         return
+    
     elif data == "lang_en":
         set_user_language(user_id, "en")
         bot.answer_callback_query(call.id, MESSAGES_EN.get("lang_changed_en", "Language changed."), show_alert=True)
+        
+        # ===== تغییر کامندهای منو به انگلیسی =====
+        try:
+            bot.set_my_commands(COMMANDS_EN)
+            logging.info("✅ Commands changed to English")
+        except Exception as e:
+            logging.error(f"❌ Error changing commands: {e}")
+        
         bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
         lang = "en"
-        keyboard = get_language_keyboard()
-        bot.edit_message_text(
-            get_message("lang_selection", lang),
-            chat_id,
-            message_id,
-            reply_markup=keyboard,
-            parse_mode='HTML'
-        )
+        
+        # ===== نمایش دکمه‌های جدید با زبان انگلیسی =====
+        if is_admin(user_id):
+            keyboard = get_admin_keyboard(lang)
+            bot.send_message(chat_id, get_message("admin_welcome", lang), reply_markup=keyboard, parse_mode='HTML')
+        else:
+            keyboard = get_language_keyboard()
+            bot.send_message(chat_id, get_message("lang_selection", lang), reply_markup=keyboard, parse_mode='HTML')
         return
     
     # ===== بقیه عملیات فقط برای ادمین‌ها =====

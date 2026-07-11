@@ -81,13 +81,15 @@ _________________
 • مدیریت ادمین‌ها: {admins}
 """,
     "permission_toggle_success": "✅ دسترسی {perm} برای ادمین {user_id} تغییر کرد.",
-    "settings_list": """⚙️ <b>تنظیمات ربات</b>
+    "settings_text": """⚙️ <b>تنظیمات ربات</b>
 
-📌 <b>کانال‌های اجباری:</b> {channels}
-📌 <b>سقف دانلود روزانه:</b> {daily_quota} 
-📌 <b>حداکثر حجم فایل:</b> {max_file_size} MB
-📌 <b>وضعیت ربات:</b> {is_active}
-📌 <b>محدودیت زمانی:</b> {rate_limit_status} ({rate_limit_seconds} ثانیه)""",
+⚠️ <b>توجه:</b> تغییر هر یک از تنظیمات زیر بر روی کل ربات اعمال می‌شود و برای همه کاربران تأثیر خواهد داشت. لطفاً با دقت اقدام کنید.
+
+• <b>وضعیت ربات:</b> فعال یا غیرفعال کردن ربات
+• <b>سقف دانلود روزانه:</b> حداکثر تعداد دانلود برای هر کاربر در روز
+• <b>حداکثر حجم فایل:</b> حداکثر حجم مجاز برای دانلود
+• <b>محدودیت زمانی:</b> فاصله زمانی بین دانلودهای هر کاربر
+""",
     "settings_updated": "✅ تنظیمات با موفقیت به‌روزرسانی شد.",
     "settings_quota_prompt": "📊 سقف دانلود روزانه را به عدد وارد کنید (0 = نامحدود):",
     "settings_size_prompt": "📦 حداکثر حجم فایل را به مگابایت وارد کنید:",
@@ -192,13 +194,15 @@ _________________
 • Manage Admins: {admins}
 """,
     "permission_toggle_success": "✅ Permission {perm} for admin {user_id} changed.",
-    "settings_list": """⚙️ <b>Bot Settings</b>
+    "settings_text": """⚙️ <b>Settings</b>
 
-📌 <b>Force Channels:</b> {channels}
-📌 <b>Daily Quota:</b> {daily_quota} 
-📌 <b>Max File Size:</b> {max_file_size} MB
-📌 <b>Bot Status:</b> {is_active}
-📌 <b>Rate Limit:</b> {rate_limit_status} ({rate_limit_seconds} seconds)""",
+⚠️ <b>Warning:</b> Changes to the settings below affect the entire bot and will impact all users. Please proceed with caution.
+
+• <b>Bot Status:</b> Enable or disable the bot
+• <b>Daily Quota:</b> Maximum downloads per user per day
+• <b>Max File Size:</b> Maximum file size allowed for download
+• <b>Rate Limit:</b> Time delay between downloads for each user
+""",
     "settings_updated": "✅ Settings updated successfully.",
     "settings_quota_prompt": "📊 Enter daily quota number (0 = unlimited):",
     "settings_size_prompt": "📦 Enter max file size in MB:",
@@ -411,6 +415,57 @@ def get_force_sub_inline_keyboard(channels, lang: str = "fa"):
         btn_back = InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")
     keyboard.add(btn_add)
     keyboard.add(btn_back)
+    return keyboard
+
+# ===== تنظیمات جدید =====
+def get_settings_new_keyboard(lang: str = "fa", daily_quota: str = "10", max_file_size: str = "50", is_active: bool = True, rate_limit_enabled: bool = False, rate_limit_seconds: int = 30):
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    
+    # ===== وضعیت ربات (کل عرض) =====
+    if lang == "en":
+        status_text = "🟢 Active" if is_active else "🔴 Inactive"
+        btn_status = InlineKeyboardButton(f"Bot Status: {status_text}", callback_data="setting_toggle_active")
+    else:
+        status_text = "🟢 فعال" if is_active else "🔴 غیرفعال"
+        btn_status = InlineKeyboardButton(f"وضعیت ربات: {status_text}", callback_data="setting_toggle_active")
+    keyboard.add(btn_status)  # row_width=1
+    
+    # ===== سقف دانلود روزانه =====
+    if lang == "en":
+        btn_quota_label = InlineKeyboardButton(f"📊 Daily Quota: {daily_quota}", callback_data="setting_quota")
+        btn_quota_change = InlineKeyboardButton("✏️ Change", callback_data="setting_quota")
+    else:
+        btn_quota_label = InlineKeyboardButton(f"📊 سقف دانلود: {daily_quota}", callback_data="setting_quota")
+        btn_quota_change = InlineKeyboardButton("✏️ تغییر", callback_data="setting_quota")
+    keyboard.add(btn_quota_label, btn_quota_change)
+    
+    # ===== حجم فایل =====
+    if lang == "en":
+        btn_size_label = InlineKeyboardButton(f"📦 Max File Size: {max_file_size} MB", callback_data="setting_size")
+        btn_size_change = InlineKeyboardButton("✏️ Change", callback_data="setting_size")
+    else:
+        btn_size_label = InlineKeyboardButton(f"📦 حجم فایل: {max_file_size} MB", callback_data="setting_size")
+        btn_size_change = InlineKeyboardButton("✏️ تغییر", callback_data="setting_size")
+    keyboard.add(btn_size_label, btn_size_change)
+    
+    # ===== محدودیت زمانی =====
+    if lang == "en":
+        rate_status = "✅ On" if rate_limit_enabled else "❌ Off"
+        btn_rate_label = InlineKeyboardButton(f"⏱️ Rate Limit: {rate_limit_seconds}s ({rate_status})", callback_data="setting_rate_limit")
+        btn_rate_change = InlineKeyboardButton("✏️ Change", callback_data="setting_rate_limit")
+    else:
+        rate_status = "✅ روشن" if rate_limit_enabled else "❌ خاموش"
+        btn_rate_label = InlineKeyboardButton(f"⏱️ محدودیت زمانی: {rate_limit_seconds}s ({rate_status})", callback_data="setting_rate_limit")
+        btn_rate_change = InlineKeyboardButton("✏️ تغییر", callback_data="setting_rate_limit")
+    keyboard.add(btn_rate_label, btn_rate_change)
+    
+    # ===== دکمه بازگشت (کل عرض) =====
+    if lang == "en":
+        btn_back = InlineKeyboardButton("🔙 Back", callback_data="admin_back")
+    else:
+        btn_back = InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")
+    keyboard.add(btn_back)
+    
     return keyboard
 
 def get_settings_inline_keyboard(lang: str = "fa"):

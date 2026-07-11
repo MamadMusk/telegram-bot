@@ -8,7 +8,8 @@ import threading
 
 from config import is_admin, DOWNLOAD_DIR
 from messages import (
-    MESSAGES, get_admin_keyboard, get_user_keyboard,
+    MESSAGES, MESSAGES_FA, MESSAGES_EN, get_message,
+    get_admin_keyboard, get_user_keyboard,
     get_force_sub_keyboard, get_confirm_keyboard,
     get_stats_refresh_keyboard, get_admin_list_inline_keyboard,
     get_settings_inline_keyboard, get_force_sub_inline_keyboard,
@@ -228,7 +229,7 @@ def show_force_sub_settings(bot, chat_id, message_id=None):
         channels = get_force_channels()
         channels_text = "\n".join([f"• {ch}" for ch in channels]) if channels else "❌ هیچ کانالی تنظیم نشده است."
         text = MESSAGES.get("force_sub_prompt", "").format(channels=channels_text)
-        lang = "fa"
+        lang = get_user_language(chat_id) or "fa"
         keyboard = get_force_sub_inline_keyboard(channels, lang)
         if message_id:
             bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
@@ -246,7 +247,7 @@ def show_settings(bot, chat_id, message_id=None):
         is_active = get_setting("is_active", "True")
         rate_limit_enabled = get_rate_limit_enabled()
         rate_limit_seconds = get_rate_limit_seconds()
-        lang = "fa"
+        lang = get_user_language(chat_id) or "fa"
         
         text = MESSAGES.get("settings_list", "").format(
             channels=channels_text,
@@ -268,7 +269,7 @@ def show_rate_limit_settings(bot, chat_id, message_id=None):
     try:
         enabled = get_rate_limit_enabled()
         seconds = get_rate_limit_seconds()
-        lang = "fa"
+        lang = get_user_language(chat_id) or "fa"
         text = MESSAGES.get("rate_limit_status", "").format(
             status="🟢 فعال" if enabled else "🔴 غیرفعال",
             seconds=seconds
@@ -437,12 +438,12 @@ def handle_callback_query(bot, call, user_data):
     # ===== انتخاب زبان =====
     if data == "lang_fa":
         set_user_language(user_id, "fa")
-        bot.answer_callback_query(call.id, MESSAGES.get("lang_changed", "زبان تغییر کرد."), show_alert=True)
+        bot.answer_callback_query(call.id, MESSAGES_FA.get("lang_changed", "زبان تغییر کرد."), show_alert=True)
         bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
         lang = "fa"
         keyboard = get_admin_inline_keyboard(lang)
         bot.edit_message_text(
-            MESSAGES.get("admin_welcome", "🛠 به پنل مدیریت خوش آمدید."),
+            MESSAGES_FA.get("admin_welcome", "🛠 به پنل مدیریت خوش آمدید."),
             chat_id,
             message_id,
             reply_markup=keyboard,
@@ -470,14 +471,14 @@ def handle_callback_query(bot, call, user_data):
         show_stats(bot, chat_id, message_id)
         return
     
-    # ===== منوی اصلی مدیریت =====
+    # ===== منوی اصلی مدیریت (از دکمه‌های Inline) =====
     if data == "admin_stats":
         bot.answer_callback_query(call.id, "📊 آماده...", show_alert=False)
         show_stats(bot, chat_id, message_id)
         return
     elif data == "admin_broadcast":
         bot.answer_callback_query(call.id, "📨 شروع ارسال همگانی...", show_alert=False)
-        bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
+        bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)  # حذف دکمه‌های قبلی
         start_broadcast(bot, chat_id)
         return
     elif data == "admin_force_sub":
@@ -791,14 +792,28 @@ def handle_callback_query(bot, call, user_data):
     elif data == "admin_back":
         bot.answer_callback_query(call.id, "🔙 بازگشت", show_alert=False)
         lang = get_user_language(user_id) or "fa"
-        keyboard = get_admin_inline_keyboard(lang)  # <-- اصلاح مهم
-        bot.edit_message_text(
-            MESSAGES.get("admin_welcome", "🛠 به پنل مدیریت خوش آمدید."),
-            chat_id,
-            message_id,
-            reply_markup=keyboard,
-            parse_mode='HTML'
-        )
+        # اگر پیام فعلی دکمه‌ی زیرین (Reply) داره، نمیشه ادیتش کرد. بهتره یه پیام جدید بفرستیم.
+        # اما چون ما معمولاً از Inline استفاده می‌کنیم، می‌تونیم ادیت کنیم.
+        try:
+            keyboard = get_admin_inline_keyboard(lang)
+            bot.edit_message_text(
+                MESSAGES.get("admin_welcome", "🛠 به پنل مدیریت خوش آمدید."),
+                chat_id,
+                message_id,
+                reply_markup=keyboard,
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            # اگر خطا خورد (مثلاً به خاطر اینکه پیام قبلی Reply داشته)، یه پیام جدید بفرست
+            logging.warning(f"Editing message failed, sending new one: {e}")
+            bot.delete_message(chat_id, message_id)
+            keyboard = get_admin_inline_keyboard(lang)
+            bot.send_message(
+                chat_id,
+                MESSAGES.get("admin_welcome", "🛠 به پنل مدیریت خوش آمدید."),
+                reply_markup=keyboard,
+                parse_mode='HTML'
+            )
         return
 
 # ===================================================
@@ -814,6 +829,7 @@ def handle_message(bot, message, user_data, user_last_download=None):
     
     logging.info(f"📨 Message from {chat_id}: {text}")
     
+    # زبان کاربر را دریافت کن (پیش‌فرض فارسی)
     lang = get_user_language(user_id) or "fa"
     add_user(user_id, username, first_name, last_name, lang)
     
@@ -830,6 +846,7 @@ def handle_message(bot, message, user_data, user_last_download=None):
             )
             return
     
+    # پردازش مراحل (step)
     step_data = user_data.get(chat_id, {})
     step = step_data.get('step')
     
@@ -902,6 +919,7 @@ def handle_message(bot, message, user_data, user_last_download=None):
         process_broadcast_message(bot, message)
         return
     
+    # ===== /start =====
     if text and text.startswith('/start'):
         keyboard = get_language_keyboard()
         bot.send_message(chat_id, MESSAGES.get("lang_selection", "🌍 لطفاً زبان خود را انتخاب کنید:"), reply_markup=keyboard)
@@ -912,6 +930,7 @@ def handle_message(bot, message, user_data, user_last_download=None):
         bot.send_message(chat_id, MESSAGES.get("lang_prompt", "🌍 برای تغییر زبان کلیک کنید:"), reply_markup=keyboard)
         return
     
+    # ===== دکمه‌های ادمین (از طریق Reply Keyboard) =====
     if is_admin(user_id):
         if text == "📊 آمار ربات" or text == "📊 Statistics":
             if not is_owner(user_id) and not has_permission(user_id, "can_view_stats"):
@@ -944,6 +963,7 @@ def handle_message(bot, message, user_data, user_last_download=None):
             show_settings(bot, chat_id)
             return
     
+    # ===== لینک اینستاگرام =====
     if text and 'instagram.com' in text:
         if get_rate_limit_enabled():
             seconds = get_rate_limit_seconds()

@@ -42,6 +42,9 @@ from database import (
     get_new_users_today, get_failed_downloads_today, get_conn
 )
 
+# ===== اضافه کردن تابع دانلود جدید از downloader.py =====
+from downloader import download_media, detect_platform, get_platform_icon
+
 OWNER_ID = 1085150385
 
 # متغیر برای نگهداری وضعیت ارسال همگانی در حال اجرا
@@ -90,121 +93,6 @@ def has_permission(user_id, permission):
 
 def is_owner(user_id):
     return user_id == OWNER_ID
-
-# ===================================================
-# 📥 توابع دانلود جدید (پشتیبانی از همه پلتفرم‌ها)
-# ===================================================
-def detect_platform(url):
-    """تشخیص پلتفرم از روی لینک"""
-    url_lower = url.lower()
-    if 'youtube.com' in url_lower or 'youtu.be' in url_lower:
-        return 'youtube'
-    elif 'instagram.com' in url_lower:
-        return 'instagram'
-    elif 'twitter.com' in url_lower or 'x.com' in url_lower:
-        return 'twitter'
-    elif 'tiktok.com' in url_lower:
-        return 'tiktok'
-    elif 'facebook.com' in url_lower or 'fb.com' in url_lower:
-        return 'facebook'
-    elif 'spotify.com' in url_lower:
-        return 'spotify'
-    elif 'soundcloud.com' in url_lower:
-        return 'soundcloud'
-    elif 'reddit.com' in url_lower:
-        return 'reddit'
-    elif 'pinterest.com' in url_lower or 'pin.it' in url_lower:
-        return 'pinterest'
-    else:
-        return 'unknown'
-
-def download_media(url, user_id):
-    """
-    دانلود از هر پلتفرم با استفاده از yt-dlp
-    برمی‌گرداند: (list_of_files, error_message)
-    """
-    platform = detect_platform(url)
-    if platform == 'unknown':
-        return None, "❌ پلتفرم پشتیبانی نمی‌شود."
-
-    ydl_opts = {
-        'outtmpl': os.path.join(DOWNLOAD_DIR, '%(title)s_%(id)s.%(ext)s'),
-        'quiet': True,
-        'no_warnings': False,
-        'ignoreerrors': True,
-        'cookiefile': 'cookies.txt' if os.path.exists('cookies.txt') else None,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
-    }
-
-    # تنظیمات مخصوص پلتفرم
-    if platform == 'youtube':
-        ydl_opts['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
-        ydl_opts['merge_output_format'] = 'mp4'
-    elif platform in ['instagram', 'twitter', 'tiktok', 'facebook', 'reddit', 'pinterest']:
-        ydl_opts['format'] = 'best[ext=mp4]/best'
-    elif platform in ['spotify', 'soundcloud']:
-        ydl_opts['format'] = 'bestaudio/best'
-        ydl_opts['postprocessors'] = [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }]
-
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            files = []
-            if info:
-                if 'entries' in info and info['entries']:
-                    for entry in info['entries']:
-                        if entry:
-                            fname = ydl.prepare_filename(entry)
-                            if os.path.exists(fname):
-                                files.append(fname)
-                else:
-                    fname = ydl.prepare_filename(info)
-                    if os.path.exists(fname):
-                        files.append(fname)
-            if files:
-                increment_download(user_id)
-                return files, None
-            return None, "❌ محتوایی برای دانلود پیدا نشد."
-    except Exception as e:
-        logging.error(f"Download error ({platform}): {e}")
-        # اگر yt-dlp خطا داد و پلتفرم اینستاگرام بود، fallback به روش قبلی
-        if platform == 'instagram':
-            return download_instagram_fallback(url, user_id)
-        return None, f"❌ خطا در دانلود: {str(e)}"
-
-def download_instagram_fallback(url, user_id):
-    """روش جایگزین برای اینستاگرام (همان کد قبلی)"""
-    try:
-        shortcode_match = re.search(r'/(?:p|reel|tv)/([^/?]+)', url)
-        if not shortcode_match:
-            return None, "لینک اینستاگرام معتبر نیست"
-        shortcode = shortcode_match.group(1)
-        # روش مستقیم تصویر
-        embed_url = f"https://www.instagram.com/p/{shortcode}/embed/"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        response = requests.get(embed_url, headers=headers, timeout=15)
-        if response.status_code == 200:
-            match = re.search(r'<img[^>]+src="([^"]+)"', response.text)
-            if match:
-                img_url = match.group(1)
-                if 'cdninstagram.com' in img_url:
-                    img_response = requests.get(img_url, headers=headers, timeout=15)
-                    if img_response.status_code == 200:
-                        filename = os.path.join(DOWNLOAD_DIR, f"{shortcode}.jpg")
-                        with open(filename, 'wb') as f:
-                            f.write(img_response.content)
-                        increment_download(user_id)
-                        return [filename], None
-        return None, "❌ دانلود اینستاگرام با مشکل مواجه شد."
-    except Exception as e:
-        logging.error(f"Instagram fallback error: {e}")
-        return None, str(e)
 
 # ===================================================
 # 📋 تولید گزارش روزانه
@@ -1106,7 +994,7 @@ def handle_callback_query(bot, call, user_data):
         return
 
 # ===================================================
-# 📨 پردازش پیام
+# 📨 پردازش پیام (نسخه نهایی با پشتیبانی از دکمه‌ها و دانلود چندپلتفرمی)
 # ===================================================
 def handle_message(bot, message, user_data, user_last_download=None):
     chat_id = message.chat.id
@@ -1421,7 +1309,7 @@ def handle_message(bot, message, user_data, user_last_download=None):
         # دستورات به صورت جداگانه در app.py یا bot.py پردازش می‌شوند
         pass
     elif text.startswith('http://') or text.startswith('https://'):
-        # ===== دانلود با پشتیبانی از همه پلتفرم‌ها =====
+        # ===== دانلود با تابع جدید (پشتیبانی از همه پلتفرم‌ها) =====
         # بررسی فعال بودن ربات
         if get_setting("is_active", "True") != "True":
             bot.send_message(chat_id, get_message("bot_inactive", lang))

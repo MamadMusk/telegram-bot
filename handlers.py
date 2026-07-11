@@ -823,7 +823,6 @@ def handle_callback_query(bot, call, user_data):
                 parse_mode='HTML'
             )
         except Exception as e:
-            # اگر خطا خورد، پیام رو پاک کن و جدید بفرست
             logging.warning(f"Editing message failed, sending new one: {e}")
             try:
                 bot.delete_message(chat_id, message_id)

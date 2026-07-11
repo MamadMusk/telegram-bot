@@ -1,8 +1,5 @@
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton
 
-# ===================================================
-# 📝 همه پیام‌های ربات (دو زبانه)
-# ===================================================
 MESSAGES_FA = {
     "start": """🎬 به ربات دانلودر خوش اومدی!
 
@@ -225,20 +222,13 @@ Click buttons below to change:""",
 """,
 }
 
-# ===================================================
-# 🔧 توابع دریافت پیام بر اساس زبان
-# ===================================================
 def get_message(key: str, lang: str = "fa") -> str:
     if lang == "en":
         return MESSAGES_EN.get(key, MESSAGES_FA.get(key, key))
     return MESSAGES_FA.get(key, key)
 
-# Aliases for backward compatibility
 MESSAGES = MESSAGES_FA
 
-# ===================================================
-# ⌨️ دکمه‌های شیشه‌ای (Reply Keyboard - فقط برای ادمین)
-# ===================================================
 def get_admin_keyboard(lang: str = "fa"):
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     if lang == "en":
@@ -261,9 +251,6 @@ def get_admin_keyboard(lang: str = "fa"):
 def get_user_keyboard():
     return ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
 
-# ===================================================
-# 🔐 دکمه‌های شیشه‌ای (Inline Keyboard)
-# ===================================================
 def get_admin_inline_keyboard(lang: str = "fa"):
     keyboard = InlineKeyboardMarkup(row_width=2)
     if lang == "en":
@@ -464,9 +451,6 @@ def get_back_keyboard(lang: str = "fa"):
     keyboard.add(btn_back)
     return keyboard
 
-# ===================================================
-# 📋 کامندها
-# ===================================================
 COMMANDS_FA = [
     BotCommand("start", "شروع و نمایش راهنما"),
     BotCommand("language", "تغییر زبان ربات"),

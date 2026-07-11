@@ -1132,4 +1132,126 @@ def handle_message(bot, message, user_data, user_last_download=None):
             return
         try:
             value = int(text.strip())
-            set_setting("max_file
+            set_setting("max_file_size", str(value))
+            bot.send_message(chat_id, get_message("settings_updated", lang))
+            show_settings(bot, chat_id)
+        except ValueError:
+            bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
+        if chat_id in user_data:
+            del user_data[chat_id]
+        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
+            del bot.user_data[chat_id]
+        return
+    elif step == 'add_force_channel':
+        if not is_owner(user_id) and not has_permission(user_id, "can_manage_force_sub"):
+            bot.send_message(chat_id, get_message("admin_no_permission", lang))
+            return
+        channel = text.strip()
+        if not channel.startswith('@'):
+            channel = f"@{channel}"
+        add_force_channel(channel)
+        bot.send_message(chat_id, get_message("force_sub_added", lang).format(channel=channel))
+        show_force_sub_settings(bot, chat_id)
+        if chat_id in user_data:
+            del user_data[chat_id]
+        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
+            del bot.user_data[chat_id]
+        return
+    elif step == 'broadcast':
+        if not is_owner(user_id) and not has_permission(user_id, "can_send_broadcast"):
+            bot.send_message(chat_id, get_message("admin_no_permission", lang))
+            return
+        process_broadcast_message(bot, message, user_data)
+        return
+    # ===== /start =====
+    if text and text.startswith('/start'):
+        keyboard = get_language_keyboard()
+        bot.send_message(chat_id, get_message("lang_selection", "fa"), reply_markup=keyboard)
+        return
+    # ===== /language =====
+    if text and text.startswith('/language'):
+        keyboard = get_language_keyboard()
+        bot.send_message(chat_id, get_message("lang_prompt", lang), reply_markup=keyboard)
+        return
+    # ===== دکمه‌های ادمین (از طریق Reply Keyboard) =====
+    if is_admin(user_id):
+        if text == "📊 آمار ربات" or text == "📊 Statistics":
+            if not is_owner(user_id) and not has_permission(user_id, "can_view_stats"):
+                bot.send_message(chat_id, get_message("admin_no_permission", lang))
+                return
+            show_stats(bot, chat_id)
+            return
+        elif text == "📨 ارسال همگانی" or text == "📨 Broadcast":
+            if not is_owner(user_id) and not has_permission(user_id, "can_send_broadcast"):
+                bot.send_message(chat_id, get_message("admin_no_permission", lang))
+                return
+            start_broadcast(bot, chat_id, user_data)
+            return
+        elif text == "🔒 قفل اسپانسر" or text == "🔒 Force Subscribe":
+            if not is_owner(user_id) and not has_permission(user_id, "can_manage_force_sub"):
+                bot.send_message(chat_id, get_message("admin_no_permission", lang))
+                return
+            show_force_sub_settings(bot, chat_id)
+            return
+        elif text == "📋 مدیریت ادمین‌ها" or text == "📋 Manage Admins":
+            if not is_owner(user_id) and not has_permission(user_id, "can_manage_admins"):
+                bot.send_message(chat_id, get_message("admin_no_permission", lang))
+                return
+            show_admin_list(bot, chat_id, None, user_id)
+            return
+        elif text == "👑 کاربران ویژه" or text == "👑 Premium Users":
+            if not is_owner(user_id) and not has_permission(user_id, "can_manage_premium"):
+                bot.send_message(chat_id, get_message("admin_no_permission", lang))
+                return
+            show_premium_users(bot, chat_id, None, user_id)
+            return
+        elif text == "⚙️ تنظیمات ربات" or text == "⚙️ Settings":
+            if not is_owner(user_id) and not has_permission(user_id, "can_manage_settings"):
+                bot.send_message(chat_id, get_message("admin_no_permission", lang))
+                return
+            show_settings(bot, chat_id)
+            return
+    # ===== لینک اینستاگرام =====
+    if text and 'instagram.com' in text:
+        # بررسی محدودیت زمانی با در نظر گرفتن تنظیمات ویژه کاربر
+        rate_limit_seconds = get_user_rate_limit(user_id)
+        if rate_limit_seconds > 0:
+            if user_last_download is not None:
+                last_download = user_last_download.get(user_id, 0)
+                elapsed = time.time() - last_download
+                if elapsed < rate_limit_seconds:
+                    remaining = int(rate_limit_seconds - elapsed)
+                    bot.send_message(
+                        chat_id,
+                        get_message("rate_limit_wait", lang).format(seconds=rate_limit_seconds, remaining=remaining)
+                    )
+                    return
+        # بررسی سقف دانلود روزانه با در نظر گرفتن تنظیمات ویژه
+        allowed, used, limit = check_quota(user_id)  # تابع check_quota از database.py
+        if not allowed:
+            bot.send_message(
+                chat_id,
+                f"⛔ شما امروز {used} دانلود انجام داده‌اید. سقف مجاز شما {limit} است. لطفاً فردا تلاش کنید."
+            )
+            return
+        msg = bot.send_message(chat_id, get_message("downloading", lang))
+        files, error = download_instagram_post(text, user_id)
+        if not files:
+            bot.edit_message_text(f"❌ {error}", chat_id, msg.message_id)
+            return
+        if user_last_download is not None:
+            user_last_download[user_id] = time.time()
+        for f in files:
+            try:
+                with open(f, 'rb') as media:
+                    if f.endswith('.mp4'):
+                        bot.send_video(chat_id, media, caption=get_message("caption", lang))
+                    else:
+                        bot.send_photo(chat_id, media, caption=get_message("caption", lang))
+                    os.remove(f)
+            except Exception as e:
+                bot.send_message(chat_id, get_message("send_error", lang).format(error=str(e)))
+        bot.delete_message(chat_id, msg.message_id)
+    else:
+        if not is_admin(user_id):
+            bot.send_message(chat_id, get_message("invalid_link", lang))

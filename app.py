@@ -16,7 +16,7 @@ app = Flask(__name__)
 
 logging.basicConfig(level=logging.INFO)
 
-# ===== تنظیم کامندهای منوی ربات =====
+# ===== تنظیم کامندهای منوی ربات (پیش‌فرض فارسی) =====
 try:
     bot.set_my_commands(COMMANDS)
     logging.info("✅ کامندها تنظیم شد")

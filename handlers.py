@@ -5,6 +5,7 @@ import os
 import requests
 import yt_dlp
 import threading
+from datetime import datetime, timezone
 from telebot.types import MenuButtonCommands, InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import is_admin, DOWNLOAD_DIR
@@ -14,7 +15,8 @@ from messages import (
     get_force_sub_keyboard, get_force_sub_inline_keyboard,
     get_confirm_keyboard, get_broadcast_cancel_keyboard,
     get_broadcast_progress_keyboard,
-    get_stats_refresh_keyboard, get_admin_list_inline_keyboard,
+    get_stats_refresh_keyboard, get_report_keyboard,
+    get_admin_list_inline_keyboard,
     get_settings_inline_keyboard, get_settings_new_keyboard,
     get_rate_limit_keyboard, get_admin_permissions_keyboard,
     get_admin_inline_keyboard, get_language_keyboard,
@@ -36,7 +38,8 @@ from database import (
     set_premium_status, remove_premium_user, get_premium_user_details,
     is_premium_user, get_user_daily_quota, get_user_max_file_size,
     get_user_rate_limit, is_user_exempt_from_force_subscribe,
-    set_admin_expire, is_admin_expired, check_quota
+    set_admin_expire, is_admin_expired, check_quota,
+    get_new_users_today, get_failed_downloads_today, get_conn
 )
 
 OWNER_ID = 1085150385
@@ -89,7 +92,7 @@ def is_owner(user_id):
     return user_id == OWNER_ID
 
 # ===================================================
-# 📥 توابع دانلود
+# 📥 توابع دانلود (از downloader.py)
 # ===================================================
 def download_image_direct(shortcode):
     try:
@@ -113,6 +116,7 @@ def download_image_direct(shortcode):
         return None
 
 def download_instagram_post(url, user_id):
+    """دانلود از اینستاگرام با استفاده از yt-dlp و fallback به روش مستقیم"""
     try:
         shortcode_match = re.search(r'/(?:p|reel|tv)/([^/?]+)', url)
         if not shortcode_match:
@@ -124,6 +128,7 @@ def download_instagram_post(url, user_id):
             'no_warnings': False,
             'format': 'best[ext=mp4]/best',
             'ignoreerrors': True,
+            'cookiefile': 'cookies.txt' if os.path.exists('cookies.txt') else None,
         }
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -153,6 +158,63 @@ def download_instagram_post(url, user_id):
     except Exception as e:
         logging.error(f"Error in download_instagram_post: {e}")
         return None, str(e)
+
+# ===================================================
+# 📋 تولید گزارش روزانه
+# ===================================================
+def generate_daily_report():
+    """تولید گزارش روزانه از وضعیت ربات"""
+    stats = get_stats()
+    total_downloads = get_total_downloads()
+    premium_users = get_all_premium_users()
+    admins = get_all_admins()
+    
+    new_users_today = get_new_users_today()
+    failed_downloads = get_failed_downloads_today()
+    
+    report = f"""📊 <b>گزارش روزانه ربات</b>
+
+📅 تاریخ: {datetime.now().strftime('%Y/%m/%d')}
+⏰ زمان: {datetime.now().strftime('%H:%M')}
+
+👥 <b>آمار کاربران:</b>
+• کل کاربران: {stats['users']}
+• کاربران جدید امروز: {new_users_today}
+• کاربران ویژه: {len(premium_users)}
+• ادمین‌ها: {len(admins)}
+
+📥 <b>آمار دانلودها:</b>
+• کل دانلودها: {total_downloads}
+• دانلودهای امروز: {stats['today_downloads']}
+• دانلودهای ناموفق امروز: {failed_downloads}
+
+👑 <b>کاربران ویژه فعال:</b>
+"""
+    if premium_users:
+        for user in premium_users[:10]:
+            name = user.get('first_name', 'Unknown')
+            username = user.get('username', '')
+            days_left = user.get('days_left')
+            days_text = f"({days_left} روز مانده)" if days_left is not None else "(همیشه)"
+            report += f"• {name} (@{username}) {days_text}\n"
+        if len(premium_users) > 10:
+            report += f"... و {len(premium_users) - 10} کاربر دیگر\n"
+    else:
+        report += "• هیچ کاربر ویژه‌ای فعال نیست.\n"
+    
+    report += f"""
+📊 <b>وضعیت ربات:</b>
+• وضعیت: {'🟢 فعال' if get_setting('is_active', 'True') == 'True' else '🔴 غیرفعال'}
+• سقف دانلود روزانه: {get_setting('daily_quota', '10')}
+• محدودیت زمانی: {'فعال' if get_rate_limit_enabled() else 'غیرفعال'} ({get_rate_limit_seconds()} ثانیه)
+"""
+    return report
+
+def send_daily_report(bot, chat_id, lang="fa"):
+    """ارسال گزارش روزانه به ادمین"""
+    report = generate_daily_report()
+    keyboard = get_report_keyboard(lang)
+    bot.send_message(chat_id, report, parse_mode='HTML', reply_markup=keyboard)
 
 # ===================================================
 # 📊 توابع ادمین (با پشتیبانی از زبان و Premium)
@@ -498,6 +560,7 @@ def handle_callback_query(bot, call, user_data):
     message_id = call.message.message_id
     data = call.data
     logging.info(f"📞 Callback: {data} from {user_id}")
+    
     # ===== انتخاب زبان =====
     if data == "lang_fa":
         set_user_language(user_id, "fa")
@@ -523,6 +586,7 @@ def handle_callback_query(bot, call, user_data):
         bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
         send_welcome_message(bot, chat_id, user_id, "en")
         return
+    
     # ===== دکمه لغو =====
     elif data == "cancel_action":
         lang = get_user_language(user_id) or "fa"
@@ -539,6 +603,7 @@ def handle_callback_query(bot, call, user_data):
             del bot.user_data[chat_id]
         bot.send_message(chat_id, get_message("broadcast_cancelled", lang))
         return
+    
     # ===== جابجایی بین لیست ادمین‌ها و ویژه =====
     elif data == "switch_to_premium":
         bot.answer_callback_query(call.id, "👑 کاربران ویژه", show_alert=False)
@@ -548,14 +613,24 @@ def handle_callback_query(bot, call, user_data):
         bot.answer_callback_query(call.id, "📋 ادمین‌ها", show_alert=False)
         show_admin_list(bot, chat_id, message_id, user_id)
         return
+    
     # ===== بقیه عملیات فقط برای ادمین‌ها =====
     if not is_admin(user_id):
         bot.answer_callback_query(call.id, "⛔ شما دسترسی ادمین ندارید!", show_alert=True)
         return
+    
     # ===== منوی اصلی مدیریت =====
     if data == "admin_stats":
         bot.answer_callback_query(call.id, "📊 آماده...", show_alert=False)
         show_stats(bot, chat_id, message_id)
+        return
+    elif data == "admin_report":
+        bot.answer_callback_query(call.id, "📋 گزارش روزانه", show_alert=False)
+        send_daily_report(bot, chat_id, get_user_language(user_id) or "fa")
+        return
+    elif data == "refresh_report":
+        bot.answer_callback_query(call.id, "🔄 در حال بروزرسانی گزارش...", show_alert=False)
+        send_daily_report(bot, chat_id, get_user_language(user_id) or "fa")
         return
     elif data == "admin_broadcast":
         bot.answer_callback_query(call.id, "📨 شروع ارسال همگانی...", show_alert=False)
@@ -585,11 +660,13 @@ def handle_callback_query(bot, call, user_data):
         except:
             pass
         return
+    
     # ===== آمار و بروزرسانی =====
     elif data == "refresh_stats":
         bot.answer_callback_query(call.id, "🔄 در حال بروزرسانی...", show_alert=False)
         show_stats(bot, chat_id, message_id)
         return
+    
     # ===== مدیریت ادمین‌ها =====
     elif data == "admin_add":
         lang = get_user_language(user_id) or "fa"
@@ -668,6 +745,7 @@ def handle_callback_query(bot, call, user_data):
         bot.answer_callback_query(call.id, "🔙 بازگشت", show_alert=False)
         show_admin_list(bot, chat_id, message_id, user_id)
         return
+    
     # ===== مدیریت کاربران ویژه =====
     elif data == "premium_add":
         lang = get_user_language(user_id) or "fa"
@@ -758,6 +836,7 @@ def handle_callback_query(bot, call, user_data):
         bot.answer_callback_query(call.id, "🔙 بازگشت", show_alert=False)
         show_premium_users(bot, chat_id, message_id, user_id)
         return
+    
     # ===== تنظیمات =====
     elif data == "setting_quota":
         lang = get_user_language(user_id) or "fa"
@@ -803,6 +882,7 @@ def handle_callback_query(bot, call, user_data):
             bot.answer_callback_query(call.id, f"✅ وضعیت ربات به {status_text} تغییر کرد!", show_alert=True)
         show_settings(bot, chat_id, message_id)
         return
+    
     # ===== محدودیت زمانی =====
     elif data == "rate_limit_enable":
         lang = get_user_language(user_id) or "fa"
@@ -837,6 +917,7 @@ def handle_callback_query(bot, call, user_data):
             bot.answer_callback_query(call.id, f"✅ محدودیت زمانی فعال شد! زمان انتظار: {seconds} ثانیه", show_alert=True)
         show_rate_limit_settings(bot, chat_id, message_id)
         return
+    
     # ===== ارسال همگانی =====
     elif data == "broadcast_cancel_start":
         lang = get_user_language(user_id) or "fa"
@@ -943,6 +1024,7 @@ def handle_callback_query(bot, call, user_data):
             bot.answer_callback_query(call.id, f"❌ کانال {channel} پیدا نشد!", show_alert=True)
         show_force_sub_settings(bot, chat_id, message_id)
         return
+    
     # ===== بازگشت به پنل مدیریت =====
     elif data == "admin_back":
         lang = get_user_language(user_id) or "fa"
@@ -970,6 +1052,7 @@ def handle_callback_query(bot, call, user_data):
                 parse_mode='HTML'
             )
         return
+    
     # ===== dummy =====
     elif data == "dummy":
         bot.answer_callback_query(call.id, "ℹ️ این دکمه فقط برای نمایش است.", show_alert=False)
@@ -988,6 +1071,7 @@ def handle_message(bot, message, user_data, user_last_download=None):
     logging.info(f"📨 Message from {chat_id}: {text}")
     lang = get_user_language(user_id) or "fa"
     add_user(user_id, username, first_name, last_name, lang)
+    
     # عضویت اجباری (با معافیت ویژه)
     if not is_admin(user_id):
         is_subscribed, not_subscribed = check_user_subscription(bot, user_id)
@@ -1001,12 +1085,14 @@ def handle_message(bot, message, user_data, user_last_download=None):
                 parse_mode='HTML'
             )
             return
+    
     # پردازش مراحل
     step_data = user_data.get(chat_id, {})
     step = step_data.get('step')
     if not step and hasattr(bot, 'user_data'):
         step_data = bot.user_data.get(chat_id, {})
         step = step_data.get('step')
+    
     # مراحل مدیریت ادمین
     if step == 'add_admin':
         if not is_owner(user_id) and not has_permission(user_id, "can_manage_admins"):
@@ -1019,7 +1105,6 @@ def handle_message(bot, message, user_data, user_last_download=None):
             else:
                 add_admin(new_admin_id, "moderator")
                 bot.send_message(chat_id, get_message("admin_add_success", lang).format(role="moderator"))
-                # حذف کیبورد لغو
                 if chat_id in user_data:
                     msg_id = user_data[chat_id].get('message_id')
                     if msg_id:
@@ -1059,6 +1144,7 @@ def handle_message(bot, message, user_data, user_last_download=None):
         if hasattr(bot, 'user_data') and chat_id in bot.user_data:
             del bot.user_data[chat_id]
         return
+    
     # مراحل مدیریت کاربران ویژه
     elif step == 'add_premium':
         if not is_owner(user_id) and not has_permission(user_id, "can_manage_premium"):
@@ -1160,185 +1246,4 @@ def handle_message(bot, message, user_data, user_last_download=None):
             del bot.user_data[chat_id]
         return
     elif step == 'premium_rate':
-        if not is_owner(user_id) and not has_permission(user_id, "can_manage_premium"):
-            bot.send_message(chat_id, get_message("admin_no_permission", lang))
-            return
-        premium_user_id = step_data.get('premium_user_id')
-        try:
-            rate = int(text.strip())
-            set_premium_status(premium_user_id, True, rate_limit=rate)
-            bot.send_message(chat_id, get_message("settings_updated", lang))
-            if chat_id in user_data:
-                msg_id = user_data[chat_id].get('message_id')
-                if msg_id:
-                    try:
-                        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
-                    except:
-                        pass
-            show_premium_user_settings(bot, chat_id, premium_user_id, None, user_id)
-        except ValueError:
-            bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
-        if chat_id in user_data:
-            del user_data[chat_id]
-        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
-            del bot.user_data[chat_id]
-        return
-    # مراحل تنظیمات ربات
-    elif step == 'set_daily_quota':
-        if not is_owner(user_id) and not has_permission(user_id, "can_manage_settings"):
-            bot.send_message(chat_id, get_message("admin_no_permission", lang))
-            return
-        try:
-            value = int(text.strip())
-            set_setting("daily_quota", str(value))
-            bot.send_message(chat_id, get_message("settings_updated", lang))
-            if chat_id in user_data:
-                msg_id = user_data[chat_id].get('message_id')
-                if msg_id:
-                    try:
-                        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
-                    except:
-                        pass
-            show_settings(bot, chat_id)
-        except ValueError:
-            bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
-        if chat_id in user_data:
-            del user_data[chat_id]
-        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
-            del bot.user_data[chat_id]
-        return
-    elif step == 'set_max_file_size':
-        if not is_owner(user_id) and not has_permission(user_id, "can_manage_settings"):
-            bot.send_message(chat_id, get_message("admin_no_permission", lang))
-            return
-        try:
-            value = int(text.strip())
-            set_setting("max_file_size", str(value))
-            bot.send_message(chat_id, get_message("settings_updated", lang))
-            if chat_id in user_data:
-                msg_id = user_data[chat_id].get('message_id')
-                if msg_id:
-                    try:
-                        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
-                    except:
-                        pass
-            show_settings(bot, chat_id)
-        except ValueError:
-            bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
-        if chat_id in user_data:
-            del user_data[chat_id]
-        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
-            del bot.user_data[chat_id]
-        return
-    elif step == 'add_force_channel':
-        if not is_owner(user_id) and not has_permission(user_id, "can_manage_force_sub"):
-            bot.send_message(chat_id, get_message("admin_no_permission", lang))
-            return
-        channel = text.strip()
-        if not channel.startswith('@'):
-            channel = f"@{channel}"
-        add_force_channel(channel)
-        bot.send_message(chat_id, get_message("force_sub_added", lang).format(channel=channel))
-        if chat_id in user_data:
-            msg_id = user_data[chat_id].get('message_id')
-            if msg_id:
-                try:
-                    bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
-                except:
-                    pass
-        show_force_sub_settings(bot, chat_id)
-        if chat_id in user_data:
-            del user_data[chat_id]
-        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
-            del bot.user_data[chat_id]
-        return
-    elif step == 'broadcast':
-        if not is_owner(user_id) and not has_permission(user_id, "can_send_broadcast"):
-            bot.send_message(chat_id, get_message("admin_no_permission", lang))
-            return
-        process_broadcast_message(bot, message, user_data)
-        return
-    # ===== /start =====
-    if text and text.startswith('/start'):
-        keyboard = get_language_keyboard()
-        bot.send_message(chat_id, get_message("lang_selection", "fa"), reply_markup=keyboard)
-        return
-    # ===== /language =====
-    if text and text.startswith('/language'):
-        keyboard = get_language_keyboard()
-        bot.send_message(chat_id, get_message("lang_prompt", lang), reply_markup=keyboard)
-        return
-    # ===== دکمه‌های ادمین (از طریق Reply Keyboard) =====
-    if is_admin(user_id):
-        if text == "📊 آمار ربات" or text == "📊 Statistics":
-            if not is_owner(user_id) and not has_permission(user_id, "can_view_stats"):
-                bot.send_message(chat_id, get_message("admin_no_permission", lang))
-                return
-            show_stats(bot, chat_id)
-            return
-        elif text == "📨 ارسال همگانی" or text == "📨 Broadcast":
-            if not is_owner(user_id) and not has_permission(user_id, "can_send_broadcast"):
-                bot.send_message(chat_id, get_message("admin_no_permission", lang))
-                return
-            start_broadcast(bot, chat_id, user_data)
-            return
-        elif text == "🔒 قفل اسپانسر" or text == "🔒 Force Subscribe":
-            if not is_owner(user_id) and not has_permission(user_id, "can_manage_force_sub"):
-                bot.send_message(chat_id, get_message("admin_no_permission", lang))
-                return
-            show_force_sub_settings(bot, chat_id)
-            return
-        elif text == "👥 مدیریت کاربران و ادمین‌ها" or text == "👥 Users & Admins":
-            if not is_owner(user_id) and not has_permission(user_id, "can_manage_admins"):
-                bot.send_message(chat_id, get_message("admin_no_permission", lang))
-                return
-            show_admin_list(bot, chat_id, None, user_id)
-            return
-        elif text == "⚙️ تنظیمات ربات" or text == "⚙️ Settings":
-            if not is_owner(user_id) and not has_permission(user_id, "can_manage_settings"):
-                bot.send_message(chat_id, get_message("admin_no_permission", lang))
-                return
-            show_settings(bot, chat_id)
-            return
-    # ===== لینک اینستاگرام =====
-    if text and 'instagram.com' in text:
-        rate_limit_seconds = get_user_rate_limit(user_id)
-        if rate_limit_seconds > 0:
-            if user_last_download is not None:
-                last_download = user_last_download.get(user_id, 0)
-                elapsed = time.time() - last_download
-                if elapsed < rate_limit_seconds:
-                    remaining = int(rate_limit_seconds - elapsed)
-                    bot.send_message(
-                        chat_id,
-                        get_message("rate_limit_wait", lang).format(seconds=rate_limit_seconds, remaining=remaining)
-                    )
-                    return
-        allowed, used, limit = check_quota(user_id)
-        if not allowed:
-            bot.send_message(
-                chat_id,
-                f"⛔ شما امروز {used} دانلود انجام داده‌اید. سقف مجاز شما {limit} است. لطفاً فردا تلاش کنید."
-            )
-            return
-        msg = bot.send_message(chat_id, get_message("downloading", lang))
-        files, error = download_instagram_post(text, user_id)
-        if not files:
-            bot.edit_message_text(f"❌ {error}", chat_id, msg.message_id)
-            return
-        if user_last_download is not None:
-            user_last_download[user_id] = time.time()
-        for f in files:
-            try:
-                with open(f, 'rb') as media:
-                    if f.endswith('.mp4'):
-                        bot.send_video(chat_id, media, caption=get_message("caption", lang))
-                    else:
-                        bot.send_photo(chat_id, media, caption=get_message("caption", lang))
-                    os.remove(f)
-            except Exception as e:
-                bot.send_message(chat_id, get_message("send_error", lang).format(error=str(e)))
-        bot.delete_message(chat_id, msg.message_id)
-    else:
-        if not is_admin(user_id):
-            bot.send_message(chat_id, get_message("invalid_link", lang))
+        if not is_owner(user_id) and not has_permission(user_id, "can_manage

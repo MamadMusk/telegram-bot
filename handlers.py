@@ -5,7 +5,7 @@ import os
 import requests
 import yt_dlp
 import threading
-from telebot.types import MenuButtonCommands  # <-- اضافه شد
+from telebot.types import MenuButtonCommands, InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import is_admin, DOWNLOAD_DIR
 from messages import (
@@ -36,6 +36,20 @@ OWNER_ID = 1085150385
 
 # متغیر برای نگهداری وضعیت ارسال همگانی در حال اجرا
 broadcast_jobs = {}
+
+# ===================================================
+# 📩 تابع ارسال پیام خوش‌آمدگویی
+# ===================================================
+def send_welcome_message(bot, chat_id, user_id, lang=None):
+    if lang is None:
+        lang = get_user_language(user_id) or "fa"
+    
+    if is_admin(user_id):
+        keyboard = get_admin_keyboard(lang)
+    else:
+        keyboard = get_user_keyboard()
+    
+    bot.send_message(chat_id, get_message("start", lang), reply_markup=keyboard)
 
 # ===================================================
 # 🔒 توابع بررسی عضویت و مجوزها
@@ -448,50 +462,34 @@ def handle_callback_query(bot, call, user_data):
         set_user_language(user_id, "fa")
         bot.answer_callback_query(call.id, MESSAGES_FA.get("lang_changed", "زبان تغییر کرد."), show_alert=True)
         
-        # ===== تغییر کامندهای منو به فارسی =====
         try:
             bot.set_my_commands(COMMANDS_FA)
-            # ===== تنظیم دکمه‌ی منو برای این کاربر خاص =====
             bot.set_chat_menu_button(chat_id, menu_button=MenuButtonCommands())
             logging.info("✅ کامندها به فارسی تغییر کرد و دکمه‌ی منو تنظیم شد")
         except Exception as e:
             logging.error(f"❌ خطا در تغییر کامندها: {e}")
         
         bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
-        lang = "fa"
         
-        # ===== نمایش دکمه‌های جدید با زبان فارسی =====
-        if is_admin(user_id):
-            keyboard = get_admin_keyboard(lang)
-            bot.send_message(chat_id, get_message("admin_welcome", lang), reply_markup=keyboard, parse_mode='HTML')
-        else:
-            keyboard = get_language_keyboard()
-            bot.send_message(chat_id, get_message("lang_selection", lang), reply_markup=keyboard, parse_mode='HTML')
+        # ===== ارسال پیام خوش‌آمدگویی با زبان فارسی =====
+        send_welcome_message(bot, chat_id, user_id, "fa")
         return
     
     elif data == "lang_en":
         set_user_language(user_id, "en")
         bot.answer_callback_query(call.id, MESSAGES_EN.get("lang_changed_en", "Language changed."), show_alert=True)
         
-        # ===== تغییر کامندهای منو به انگلیسی =====
         try:
             bot.set_my_commands(COMMANDS_EN)
-            # ===== تنظیم دکمه‌ی منو برای این کاربر خاص =====
             bot.set_chat_menu_button(chat_id, menu_button=MenuButtonCommands())
             logging.info("✅ Commands changed to English and menu button set")
         except Exception as e:
             logging.error(f"❌ Error changing commands: {e}")
         
         bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
-        lang = "en"
         
-        # ===== نمایش دکمه‌های جدید با زبان انگلیسی =====
-        if is_admin(user_id):
-            keyboard = get_admin_keyboard(lang)
-            bot.send_message(chat_id, get_message("admin_welcome", lang), reply_markup=keyboard, parse_mode='HTML')
-        else:
-            keyboard = get_language_keyboard()
-            bot.send_message(chat_id, get_message("lang_selection", lang), reply_markup=keyboard, parse_mode='HTML')
+        # ===== ارسال پیام خوش‌آمدگویی با زبان انگلیسی =====
+        send_welcome_message(bot, chat_id, user_id, "en")
         return
     
     # ===== بقیه عملیات فقط برای ادمین‌ها =====
@@ -996,6 +994,7 @@ def handle_message(bot, message, user_data, user_last_download=None):
     
     # ===== /start =====
     if text and text.startswith('/start'):
+        # ===== ارسال دکمه‌های انتخاب زبان =====
         keyboard = get_language_keyboard()
         bot.send_message(chat_id, get_message("lang_selection", "fa"), reply_markup=keyboard)
         return

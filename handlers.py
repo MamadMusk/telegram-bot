@@ -223,6 +223,7 @@ def show_admin_permissions(bot, chat_id, admin_id, message_id=None, current_user
         name = admin_info.get('first_name', 'Unknown') if admin_info else 'Unknown'
         role = get_admin_role(admin_id) or 'viewer'
         
+        # ===== نمایش جدید با دکمه‌های دو بخشی =====
         text = get_message("admin_permissions_header", lang).format(
             name=name,
             user_id=admin_id,
@@ -570,6 +571,7 @@ def handle_callback_query(bot, call, user_data):
         if admin_id == OWNER_ID:
             bot.answer_callback_query(call.id, get_message("admin_cant_remove_owner", lang), show_alert=True)
             return
+        
         perms = get_admin_permissions(admin_id)
         old_value = perms.get(perm_key, False)
         new_value = not old_value
@@ -578,36 +580,9 @@ def handle_callback_query(bot, call, user_data):
         if not success:
             bot.answer_callback_query(call.id, "❌ خطا در ذخیره دسترسی!", show_alert=True)
             return
-        admin_info = get_user(admin_id)
-        name = admin_info.get('first_name', 'Unknown') if admin_info else 'Unknown'
-        role = get_admin_role(admin_id) or 'viewer'
-        text = get_message("admin_permissions_header", lang).format(
-            name=name,
-            user_id=admin_id,
-            role=role,
-            stats="✅" if perms.get("can_view_stats", False) else "❌",
-            broadcast="✅" if perms.get("can_send_broadcast", False) else "❌",
-            force_sub="✅" if perms.get("can_manage_force_sub", False) else "❌",
-            settings="✅" if perms.get("can_manage_settings", False) else "❌",
-            admins="✅" if perms.get("can_manage_admins", False) else "❌"
-        )
-        keyboard = get_admin_permissions_keyboard(admin_id, perms, is_owner=False, lang=lang)
-        try:
-            bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
-            perm_names = {
-                "can_view_stats": "مشاهده آمار",
-                "can_send_broadcast": "ارسال همگانی",
-                "can_manage_force_sub": "قفل اسپانسر",
-                "can_manage_settings": "تنظیمات",
-                "can_manage_admins": "مدیریت ادمین‌ها"
-            }
-            bot.answer_callback_query(call.id, f"✅ {perm_names.get(perm_key, perm_key)} {'فعال' if new_value else 'غیرفعال'} شد!", show_alert=False)
-        except Exception as e:
-            if "message is not modified" in str(e):
-                bot.answer_callback_query(call.id, f"ℹ️ دسترسی قبلاً {'فعال' if old_value else 'غیرفعال'} بود!", show_alert=False)
-            else:
-                logging.error(f"❌ Error in perm toggle: {e}")
-                bot.answer_callback_query(call.id, f"❌ خطا: {str(e)}", show_alert=True)
+        
+        # ===== به‌روزرسانی صفحه =====
+        show_admin_permissions(bot, chat_id, admin_id, message_id, user_id)
         return
     
     elif data.startswith("admin_remove_"):
@@ -706,7 +681,7 @@ def handle_callback_query(bot, call, user_data):
         show_settings(bot, chat_id, message_id)
         return
     
-    # ===== محدودیت زمانی =====
+    # ===== محدودیت زمانی (دکمه‌های تغییر سریع) =====
     elif data == "rate_limit_enable":
         lang = get_user_language(user_id) or "fa"
         if not is_owner(user_id) and not has_permission(user_id, "can_manage_settings"):

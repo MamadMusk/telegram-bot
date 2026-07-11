@@ -63,7 +63,6 @@ def get_force_channels():
     return get_force_channels_list()
 
 def check_user_subscription(bot, user_id):
-    # کاربران ویژه و ادمین‌ها معاف هستند
     if is_user_exempt_from_force_subscribe(user_id):
         return True, []
     channels = get_force_channels()
@@ -1045,7 +1044,6 @@ def handle_message(bot, message, user_data, user_last_download=None):
             days = int(text.strip())
             set_admin_expire(admin_id, days if days > 0 else None)
             bot.send_message(chat_id, get_message("premium_expire_success", lang))
-            # حذف کیبورد لغو
             if chat_id in user_data:
                 msg_id = user_data[chat_id].get('message_id')
                 if msg_id:
@@ -1074,7 +1072,6 @@ def handle_message(bot, message, user_data, user_last_download=None):
                 return
             set_premium_status(premium_user_id, True)
             bot.send_message(chat_id, f"✅ کاربر {premium_user_id} به ویژه اضافه شد.")
-            # حذف کیبورد لغو
             if chat_id in user_data:
                 msg_id = user_data[chat_id].get('message_id')
                 if msg_id:

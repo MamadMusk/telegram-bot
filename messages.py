@@ -364,8 +364,12 @@ def get_admin_list_inline_keyboard(admins, current_user_id, lang: str = "fa"):
         keyboard.add(InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back"))
     return keyboard
 
+# ===================================================
+# 🆕 دکمه‌های جدید مدیریت دسترسی ادمین
+# ===================================================
 def get_admin_permissions_keyboard(admin_user_id, permissions, is_owner=False, lang: str = "fa"):
     keyboard = InlineKeyboardMarkup(row_width=2)
+    
     if lang == "en":
         perm_labels = {
             "can_view_stats": "👁️ View Stats",
@@ -374,8 +378,6 @@ def get_admin_permissions_keyboard(admin_user_id, permissions, is_owner=False, l
             "can_manage_settings": "⚙️ Settings",
             "can_manage_admins": "👥 Manage Admins"
         }
-        remove_label = "❌ Remove Admin"
-        back_label = "🔙 Back to List"
     else:
         perm_labels = {
             "can_view_stats": "👁️ مشاهده آمار",
@@ -384,40 +386,33 @@ def get_admin_permissions_keyboard(admin_user_id, permissions, is_owner=False, l
             "can_manage_settings": "⚙️ تنظیمات",
             "can_manage_admins": "👥 مدیریت ادمین‌ها"
         }
-        remove_label = "❌ حذف ادمین"
-        back_label = "🔙 بازگشت به لیست"
     
     for perm_key, perm_label in perm_labels.items():
         status = "✅" if permissions.get(perm_key, False) else "❌"
-        btn = InlineKeyboardButton(
-            f"{status} {perm_label}",
-            callback_data=f"admin_perm_toggle_{admin_user_id}_{perm_key}"
-        )
-        keyboard.add(btn)
+        btn_label = InlineKeyboardButton(perm_label, callback_data=f"perm_{perm_key}")
+        btn_status = InlineKeyboardButton(status, callback_data=f"admin_perm_toggle_{admin_user_id}_{perm_key}")
+        keyboard.add(btn_label, btn_status)
+    
+    # دکمه حذف ادمین (فقط اگر owner نباشد)
     if not is_owner:
-        keyboard.add(InlineKeyboardButton(remove_label, callback_data=f"admin_remove_{admin_user_id}"))
-    keyboard.add(InlineKeyboardButton(back_label, callback_data="admin_list_back"))
-    return keyboard
-
-def get_force_sub_inline_keyboard(channels, lang: str = "fa"):
-    keyboard = InlineKeyboardMarkup(row_width=1)
-    for channel in channels:
         if lang == "en":
-            btn_remove = InlineKeyboardButton(f"❌ Remove {channel}", callback_data=f"force_sub_remove_{channel}")
+            remove_label = "❌ Remove Admin"
         else:
-            btn_remove = InlineKeyboardButton(f"❌ حذف {channel}", callback_data=f"force_sub_remove_{channel}")
-        keyboard.add(btn_remove)
+            remove_label = "❌ حذف ادمین"
+        keyboard.add(InlineKeyboardButton(remove_label, callback_data=f"admin_remove_{admin_user_id}"))
+    
+    # دکمه بازگشت به لیست (کل عرض)
     if lang == "en":
-        btn_add = InlineKeyboardButton("➕ Add Channel", callback_data="force_sub_add")
-        btn_back = InlineKeyboardButton("🔙 Back", callback_data="admin_back")
+        back_label = "🔙 Back to List"
     else:
-        btn_add = InlineKeyboardButton("➕ افزودن کانال", callback_data="force_sub_add")
-        btn_back = InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")
-    keyboard.add(btn_add)
-    keyboard.add(btn_back)
+        back_label = "🔙 بازگشت به لیست"
+    keyboard.add(InlineKeyboardButton(back_label, callback_data="admin_list_back"))
+    
     return keyboard
 
-# ===== تنظیمات جدید =====
+# ===================================================
+# 🆕 دکمه‌های جدید تنظیمات ربات
+# ===================================================
 def get_settings_new_keyboard(lang: str = "fa", daily_quota: str = "10", max_file_size: str = "50", is_active: bool = True, rate_limit_enabled: bool = False, rate_limit_seconds: int = 30):
     keyboard = InlineKeyboardMarkup(row_width=2)
     
@@ -428,36 +423,36 @@ def get_settings_new_keyboard(lang: str = "fa", daily_quota: str = "10", max_fil
     else:
         status_text = "🟢 فعال" if is_active else "🔴 غیرفعال"
         btn_status = InlineKeyboardButton(f"وضعیت ربات: {status_text}", callback_data="setting_toggle_active")
-    keyboard.add(btn_status)  # row_width=1
+    keyboard.add(btn_status)
     
     # ===== سقف دانلود روزانه =====
     if lang == "en":
-        btn_quota_label = InlineKeyboardButton(f"📊 Daily Quota: {daily_quota}", callback_data="setting_quota")
-        btn_quota_change = InlineKeyboardButton("✏️ Change", callback_data="setting_quota")
+        btn_quota_label = InlineKeyboardButton("📊 Daily Quota", callback_data="setting_quota")
+        btn_quota_value = InlineKeyboardButton(daily_quota, callback_data="setting_quota")
     else:
-        btn_quota_label = InlineKeyboardButton(f"📊 سقف دانلود: {daily_quota}", callback_data="setting_quota")
-        btn_quota_change = InlineKeyboardButton("✏️ تغییر", callback_data="setting_quota")
-    keyboard.add(btn_quota_label, btn_quota_change)
+        btn_quota_label = InlineKeyboardButton("📊 سقف دانلود", callback_data="setting_quota")
+        btn_quota_value = InlineKeyboardButton(daily_quota, callback_data="setting_quota")
+    keyboard.add(btn_quota_label, btn_quota_value)
     
     # ===== حجم فایل =====
     if lang == "en":
-        btn_size_label = InlineKeyboardButton(f"📦 Max File Size: {max_file_size} MB", callback_data="setting_size")
-        btn_size_change = InlineKeyboardButton("✏️ Change", callback_data="setting_size")
+        btn_size_label = InlineKeyboardButton("📦 Max File Size", callback_data="setting_size")
+        btn_size_value = InlineKeyboardButton(f"{max_file_size} MB", callback_data="setting_size")
     else:
-        btn_size_label = InlineKeyboardButton(f"📦 حجم فایل: {max_file_size} MB", callback_data="setting_size")
-        btn_size_change = InlineKeyboardButton("✏️ تغییر", callback_data="setting_size")
-    keyboard.add(btn_size_label, btn_size_change)
+        btn_size_label = InlineKeyboardButton("📦 حجم فایل", callback_data="setting_size")
+        btn_size_value = InlineKeyboardButton(f"{max_file_size} MB", callback_data="setting_size")
+    keyboard.add(btn_size_label, btn_size_value)
     
     # ===== محدودیت زمانی =====
     if lang == "en":
         rate_status = "✅ On" if rate_limit_enabled else "❌ Off"
-        btn_rate_label = InlineKeyboardButton(f"⏱️ Rate Limit: {rate_limit_seconds}s ({rate_status})", callback_data="setting_rate_limit")
-        btn_rate_change = InlineKeyboardButton("✏️ Change", callback_data="setting_rate_limit")
+        btn_rate_label = InlineKeyboardButton("⏱️ Rate Limit", callback_data="setting_rate_limit")
+        btn_rate_value = InlineKeyboardButton(f"{rate_limit_seconds}s ({rate_status})", callback_data="setting_rate_limit")
     else:
         rate_status = "✅ روشن" if rate_limit_enabled else "❌ خاموش"
-        btn_rate_label = InlineKeyboardButton(f"⏱️ محدودیت زمانی: {rate_limit_seconds}s ({rate_status})", callback_data="setting_rate_limit")
-        btn_rate_change = InlineKeyboardButton("✏️ تغییر", callback_data="setting_rate_limit")
-    keyboard.add(btn_rate_label, btn_rate_change)
+        btn_rate_label = InlineKeyboardButton("⏱️ محدودیت زمانی", callback_data="setting_rate_limit")
+        btn_rate_value = InlineKeyboardButton(f"{rate_limit_seconds}s ({rate_status})", callback_data="setting_rate_limit")
+    keyboard.add(btn_rate_label, btn_rate_value)
     
     # ===== دکمه بازگشت (کل عرض) =====
     if lang == "en":

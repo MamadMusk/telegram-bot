@@ -286,7 +286,7 @@ def show_rate_limit_settings(bot, chat_id, message_id=None):
 # ===================================================
 # 📨 ارسال همگانی با نمایش پیشرفت و دکمه لغو
 # ===================================================
-def start_broadcast(bot, chat_id):
+def start_broadcast(bot, chat_id, user_data=None):
     try:
         logging.info(f"📨 start_broadcast called for {chat_id}")
         lang = get_user_language(chat_id) or "fa"
@@ -296,6 +296,10 @@ def start_broadcast(bot, chat_id):
             get_message("broadcast_prompt", lang),
             reply_markup=keyboard
         )
+        # ذخیره مرحله در user_data (که از app.py اومده)
+        if user_data is not None:
+            user_data[chat_id] = {'step': 'broadcast', 'message_id': msg.message_id}
+        # همچنین در bot.user_data برای سازگاری
         if not hasattr(bot, 'user_data'):
             bot.user_data = {}
         bot.user_data[chat_id] = {'step': 'broadcast', 'message_id': msg.message_id}
@@ -303,21 +307,25 @@ def start_broadcast(bot, chat_id):
     except Exception as e:
         logging.error(f"❌ Error in start_broadcast: {e}")
 
-def process_broadcast_message(bot, message):
+def process_broadcast_message(bot, message, user_data):
     chat_id = message.chat.id
     broadcast_text = message.text
     lang = get_user_language(chat_id) or "fa"
     
     # حذف پیام پرامپت قبلی
     try:
-        if chat_id in bot.user_data and 'message_id' in bot.user_data[chat_id]:
+        if chat_id in user_data and 'message_id' in user_data[chat_id]:
+            bot.delete_message(chat_id, user_data[chat_id]['message_id'])
+        elif hasattr(bot, 'user_data') and chat_id in bot.user_data and 'message_id' in bot.user_data[chat_id]:
             bot.delete_message(chat_id, bot.user_data[chat_id]['message_id'])
     except:
         pass
     
     if not broadcast_text or len(broadcast_text.strip()) == 0:
         bot.send_message(chat_id, get_message("broadcast_empty", lang))
-        if chat_id in bot.user_data:
+        if chat_id in user_data:
+            del user_data[chat_id]
+        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
             del bot.user_data[chat_id]
         return
     
@@ -326,7 +334,9 @@ def process_broadcast_message(bot, message):
     preview_text = get_message("broadcast_preview", lang).format(message=broadcast_text, count=count)
     keyboard = get_confirm_keyboard(lang)
     msg = bot.send_message(chat_id, preview_text, reply_markup=keyboard, parse_mode='HTML')
-    bot.user_data[chat_id] = {'broadcast_message': broadcast_text, 'message_id': msg.message_id}
+    user_data[chat_id] = {'broadcast_message': broadcast_text, 'message_id': msg.message_id}
+    if hasattr(bot, 'user_data'):
+        bot.user_data[chat_id] = {'broadcast_message': broadcast_text, 'message_id': msg.message_id}
 
 def start_broadcast_send(bot, chat_id, broadcast_text):
     users = get_all_users()
@@ -482,7 +492,7 @@ def handle_callback_query(bot, call, user_data):
     elif data == "admin_broadcast":
         bot.answer_callback_query(call.id, "📨 شروع ارسال همگانی...", show_alert=False)
         bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
-        start_broadcast(bot, chat_id)
+        start_broadcast(bot, chat_id, user_data)
         return
     elif data == "admin_force_sub":
         bot.answer_callback_query(call.id, "🔒 قفل اسپانسر", show_alert=False)
@@ -732,7 +742,9 @@ def handle_callback_query(bot, call, user_data):
             bot.delete_message(chat_id, message_id)
         except:
             pass
-        if chat_id in bot.user_data:
+        if chat_id in user_data:
+            del user_data[chat_id]
+        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
             del bot.user_data[chat_id]
         bot.send_message(chat_id, get_message("broadcast_cancelled", lang))
         return
@@ -743,7 +755,9 @@ def handle_callback_query(bot, call, user_data):
             bot.answer_callback_query(call.id, get_message("admin_no_permission", lang), show_alert=True)
             return
         
-        data_obj = bot.user_data.get(user_id, {})
+        data_obj = user_data.get(user_id, {})
+        if not data_obj:
+            data_obj = bot.user_data.get(user_id, {})
         broadcast_text = data_obj.get('broadcast_message', '')
         if not broadcast_text:
             bot.send_message(user_id, get_message("broadcast_failed", lang).format(error="پیامی برای ارسال وجود ندارد."))
@@ -757,20 +771,26 @@ def handle_callback_query(bot, call, user_data):
         bot.answer_callback_query(call.id, "📨 شروع ارسال همگانی...", show_alert=False)
         start_broadcast_send(bot, chat_id, broadcast_text)
         
-        if user_id in bot.user_data:
+        if user_id in user_data:
+            del user_data[user_id]
+        if hasattr(bot, 'user_data') and user_id in bot.user_data:
             del bot.user_data[user_id]
         return
     
     elif data == "broadcast_cancel":
         lang = get_user_language(user_id) or "fa"
         bot.answer_callback_query(call.id, "❌ لغو شد", show_alert=False)
-        data_obj = bot.user_data.get(user_id, {})
+        data_obj = user_data.get(user_id, {})
+        if not data_obj:
+            data_obj = bot.user_data.get(user_id, {})
         try:
             bot.edit_message_reply_markup(chat_id, data_obj.get('message_id'), reply_markup=None)
         except:
             pass
         bot.send_message(user_id, get_message("broadcast_cancelled", lang))
-        if user_id in bot.user_data:
+        if user_id in user_data:
+            del user_data[user_id]
+        if hasattr(bot, 'user_data') and user_id in bot.user_data:
             del bot.user_data[user_id]
         return
     
@@ -867,9 +887,14 @@ def handle_message(bot, message, user_data, user_last_download=None):
             )
             return
     
-    # پردازش مراحل (step)
+    # پردازش مراحل (step) - از user_data استفاده کن
     step_data = user_data.get(chat_id, {})
     step = step_data.get('step')
+    
+    # اگر در user_data نبود، از bot.user_data چک کن
+    if not step and hasattr(bot, 'user_data'):
+        step_data = bot.user_data.get(chat_id, {})
+        step = step_data.get('step')
     
     if step == 'add_admin':
         if not is_owner(user_id) and not has_permission(user_id, "can_manage_admins"):
@@ -887,6 +912,8 @@ def handle_message(bot, message, user_data, user_last_download=None):
             bot.send_message(chat_id, get_message("admin_invalid_id", lang))
         if chat_id in user_data:
             del user_data[chat_id]
+        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
+            del bot.user_data[chat_id]
         return
     
     elif step == 'add_force_channel':
@@ -901,6 +928,8 @@ def handle_message(bot, message, user_data, user_last_download=None):
         show_force_sub_settings(bot, chat_id)
         if chat_id in user_data:
             del user_data[chat_id]
+        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
+            del bot.user_data[chat_id]
         return
     
     elif step == 'set_daily_quota':
@@ -916,6 +945,8 @@ def handle_message(bot, message, user_data, user_last_download=None):
             bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
         if chat_id in user_data:
             del user_data[chat_id]
+        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
+            del bot.user_data[chat_id]
         return
     
     elif step == 'set_max_file_size':
@@ -931,13 +962,15 @@ def handle_message(bot, message, user_data, user_last_download=None):
             bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
         if chat_id in user_data:
             del user_data[chat_id]
+        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
+            del bot.user_data[chat_id]
         return
     
     elif step == 'broadcast':
         if not is_owner(user_id) and not has_permission(user_id, "can_send_broadcast"):
             bot.send_message(chat_id, get_message("admin_no_permission", lang))
             return
-        process_broadcast_message(bot, message)
+        process_broadcast_message(bot, message, user_data)
         return
     
     # ===== /start =====
@@ -963,7 +996,7 @@ def handle_message(bot, message, user_data, user_last_download=None):
             if not is_owner(user_id) and not has_permission(user_id, "can_send_broadcast"):
                 bot.send_message(chat_id, get_message("admin_no_permission", lang))
                 return
-            start_broadcast(bot, chat_id)
+            start_broadcast(bot, chat_id, user_data)
             return
         elif text == "🔒 قفل اسپانسر" or text == "🔒 Force Subscribe":
             if not is_owner(user_id) and not has_permission(user_id, "can_manage_force_sub"):

@@ -11,13 +11,13 @@ from config import is_admin, DOWNLOAD_DIR
 from messages import (
     MESSAGES, MESSAGES_FA, MESSAGES_EN, get_message,
     get_admin_keyboard, get_user_keyboard,
-    get_force_sub_keyboard, get_confirm_keyboard,
+    get_force_sub_keyboard, get_force_sub_inline_keyboard,
+    get_confirm_keyboard, get_broadcast_cancel_keyboard,
+    get_broadcast_progress_keyboard,
     get_stats_refresh_keyboard, get_admin_list_inline_keyboard,
-    get_settings_inline_keyboard, get_force_sub_inline_keyboard,
+    get_settings_inline_keyboard, get_settings_new_keyboard,
     get_rate_limit_keyboard, get_admin_permissions_keyboard,
-    get_broadcast_progress_keyboard, get_broadcast_cancel_keyboard,
     get_admin_inline_keyboard, get_language_keyboard,
-    get_settings_new_keyboard,
     COMMANDS_FA, COMMANDS_EN
 )
 from database import (
@@ -571,7 +571,6 @@ def handle_callback_query(bot, call, user_data):
         if admin_id == OWNER_ID:
             bot.answer_callback_query(call.id, get_message("admin_cant_remove_owner", lang), show_alert=True)
             return
-        
         perms = get_admin_permissions(admin_id)
         old_value = perms.get(perm_key, False)
         new_value = not old_value

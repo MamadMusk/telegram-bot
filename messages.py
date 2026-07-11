@@ -1,5 +1,8 @@
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton
 
+# ===================================================
+# 📝 همه پیام‌های ربات (دو زبانه)
+# ===================================================
 MESSAGES_FA = {
     "start": """🎬 به ربات دانلودر خوش اومدی!
 
@@ -11,7 +14,7 @@ MESSAGES_FA = {
     "lang_selection": "🌍 لطفاً زبان مورد نظر خود را انتخاب کنید:\nPlease select your language:",
     "lang_changed": "✅ زبان با موفقیت به فارسی تغییر کرد.",
     "lang_changed_en": "✅ Language changed to English successfully.",
-    "lang_prompt": "🌍 برای تغییر زبان، روی دکمه زیر کلیک کنید:",
+    "lang_prompt": "🌍 برای تغییر زبان، روی دکمه زیر کلیک کنید یا از کامند /language استفاده کنید:",
     "downloading": "⏳ دانلود...",
     "invalid_link": "❌ لطفاً یه لینک معتبر اینستاگرام بفرست.",
     "download_failed": "❌ دانلود نشد. پست ممکنه خصوصی یا حذف شده باشه.",
@@ -122,7 +125,7 @@ Send your Instagram link to download.
     "lang_selection": "🌍 Please select your language:\nلطفاً زبان مورد نظر خود را انتخاب کنید:",
     "lang_changed": "✅ Language changed to Persian successfully.",
     "lang_changed_en": "✅ Language changed to English successfully.",
-    "lang_prompt": "🌍 To change language, click the button below:",
+    "lang_prompt": "🌍 To change language, click the button below or use /language command:",
     "downloading": "⏳ Downloading...",
     "invalid_link": "❌ Please send a valid Instagram link.",
     "download_failed": "❌ Download failed. Post might be private or deleted.",
@@ -222,13 +225,21 @@ Click buttons below to change:""",
 """,
 }
 
+# ===================================================
+# 🔧 توابع دریافت پیام بر اساس زبان
+# ===================================================
 def get_message(key: str, lang: str = "fa") -> str:
+    """دریافت پیام بر اساس زبان کاربر"""
     if lang == "en":
         return MESSAGES_EN.get(key, MESSAGES_FA.get(key, key))
     return MESSAGES_FA.get(key, key)
 
+# Aliases for backward compatibility
 MESSAGES = MESSAGES_FA
 
+# ===================================================
+# ⌨️ دکمه‌های شیشه‌ای (Reply Keyboard - فقط برای ادمین)
+# ===================================================
 def get_admin_keyboard(lang: str = "fa"):
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     if lang == "en":
@@ -251,6 +262,9 @@ def get_admin_keyboard(lang: str = "fa"):
 def get_user_keyboard():
     return ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
 
+# ===================================================
+# 🔐 دکمه‌های شیشه‌ای (Inline Keyboard)
+# ===================================================
 def get_admin_inline_keyboard(lang: str = "fa"):
     keyboard = InlineKeyboardMarkup(row_width=2)
     if lang == "en":
@@ -451,6 +465,9 @@ def get_back_keyboard(lang: str = "fa"):
     keyboard.add(btn_back)
     return keyboard
 
+# ===================================================
+# 📋 کامندها (این بخش رو به‌روز کردم)
+# ===================================================
 COMMANDS_FA = [
     BotCommand("start", "شروع و نمایش راهنما"),
     BotCommand("language", "تغییر زبان ربات"),

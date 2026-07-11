@@ -6,6 +6,7 @@ import logging
 from config import TOKEN
 from handlers import handle_message, handle_callback_query
 from database import init_db
+from messages import COMMANDS
 
 # ===== راه‌اندازی دیتابیس =====
 init_db()
@@ -14,6 +15,13 @@ bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 logging.basicConfig(level=logging.INFO)
+
+# ===== تنظیم کامندهای منوی ربات =====
+try:
+    bot.set_my_commands(COMMANDS)
+    logging.info("✅ کامندها تنظیم شد")
+except Exception as e:
+    logging.error(f"❌ خطا در تنظیم کامندها: {e}")
 
 # دیکشنری برای ذخیره داده‌های موقت کاربران
 user_data = {}

@@ -5,6 +5,7 @@ import os
 import requests
 import yt_dlp
 import threading
+from telebot.types import MenuButtonCommands  # <-- اضافه شد
 
 from config import is_admin, DOWNLOAD_DIR
 from messages import (
@@ -450,7 +451,9 @@ def handle_callback_query(bot, call, user_data):
         # ===== تغییر کامندهای منو به فارسی =====
         try:
             bot.set_my_commands(COMMANDS_FA)
-            logging.info("✅ کامندها به فارسی تغییر کرد")
+            # ===== تنظیم دکمه‌ی منو برای این کاربر خاص =====
+            bot.set_chat_menu_button(chat_id, menu_button=MenuButtonCommands())
+            logging.info("✅ کامندها به فارسی تغییر کرد و دکمه‌ی منو تنظیم شد")
         except Exception as e:
             logging.error(f"❌ خطا در تغییر کامندها: {e}")
         
@@ -473,7 +476,9 @@ def handle_callback_query(bot, call, user_data):
         # ===== تغییر کامندهای منو به انگلیسی =====
         try:
             bot.set_my_commands(COMMANDS_EN)
-            logging.info("✅ Commands changed to English")
+            # ===== تنظیم دکمه‌ی منو برای این کاربر خاص =====
+            bot.set_chat_menu_button(chat_id, menu_button=MenuButtonCommands())
+            logging.info("✅ Commands changed to English and menu button set")
         except Exception as e:
             logging.error(f"❌ Error changing commands: {e}")
         

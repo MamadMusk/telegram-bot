@@ -1,111 +1,155 @@
 """
-database.py — Unified SQLite database layer (sync).
+database.py — Unified database layer with PostgreSQL and SQLite support.
 """
 
-from __future__ import annotations
-
 import os
-import sqlite3
-import threading
 import json
 import logging
-from contextlib import contextmanager
-from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime, timezone
 
-from config import DB_PATH, ADMIN_IDS
+from config import ADMIN_IDS
 
-_write_lock = threading.Lock()
 logger = logging.getLogger(__name__)
 
+# ===== انتخاب نوع دیتابیس =====
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+
+if DATABASE_URL:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    
+    def get_conn():
+        return psycopg2.connect(DATABASE_URL)
+    
+    def dict_factory(cursor, row):
+        return {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
+    
+    DB_TYPE = "postgres"
+else:
+    import sqlite3
+    import threading
+    _write_lock = threading.Lock()
+    DB_PATH = os.getenv("DB_PATH", "users.db")
+    
+    def get_conn():
+        os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
+        conn = sqlite3.connect(DB_PATH, timeout=30, isolation_level=None)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA foreign_keys=ON;")
+        conn.execute("PRAGMA busy_timeout=30000;")
+        return conn
+    
+    DB_TYPE = "sqlite"
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-
-@contextmanager
-def get_conn() -> Iterator[sqlite3.Connection]:
-    os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, timeout=30, isolation_level=None)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA foreign_keys=ON;")
-    conn.execute("PRAGMA busy_timeout=30000;")
-    try:
-        yield conn
-    finally:
-        conn.close()
-
-
-def init_db() -> None:
-    """ایجاد جداول با پشتیبانی از زبان، تاریخ انقضا و ..."""
-    os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
-
+def init_db():
+    """ایجاد جداول"""
     with get_conn() as conn:
         c = conn.cursor()
-
-        # ─── Users با ستون زبان ───
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id            INTEGER PRIMARY KEY,
-                username      TEXT,
-                first_name    TEXT,
-                last_name     TEXT,
-                joined_date   TEXT DEFAULT (datetime('now')),
-                is_banned     INTEGER DEFAULT 0,
-                is_premium    INTEGER DEFAULT 0,
-                last_seen     TEXT,
-                language      TEXT DEFAULT 'fa'
-            )
-        """)
-
-        # ─── Downloads ───
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS downloads (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id       INTEGER NOT NULL,
-                post_url      TEXT NOT NULL,
-                platform      TEXT DEFAULT 'instagram',
-                status        TEXT DEFAULT 'success',
-                file_size_kb  INTEGER,
-                download_date TEXT DEFAULT (datetime('now')),
-                FOREIGN KEY(user_id) REFERENCES users(id)
-            )
-        """)
-
-        # ─── Settings (key-value) ───
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS settings (
-                key   TEXT PRIMARY KEY,
-                value TEXT
-            )
-        """)
-
-        # ─── Daily quota (rate limiting) ───
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS daily_quota (
-                user_id      INTEGER NOT NULL,
-                quota_date   TEXT NOT NULL,
-                count        INTEGER DEFAULT 0,
-                PRIMARY KEY (user_id, quota_date),
-                FOREIGN KEY(user_id) REFERENCES users(id)
-            )
-        """)
-
-        # ─── Admins با تاریخ انقضا ───
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS admins (
-                user_id      INTEGER PRIMARY KEY,
-                role         TEXT DEFAULT 'viewer',
-                added_at     TEXT DEFAULT (datetime('now')),
-                permissions  TEXT DEFAULT '{}',
-                expire_date  TEXT
-            )
-        """)
-
-        # ─── Default settings ───
+        
+        if DB_TYPE == "postgres":
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id            BIGINT PRIMARY KEY,
+                    username      TEXT,
+                    first_name    TEXT,
+                    last_name     TEXT,
+                    joined_date   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    is_banned     INTEGER DEFAULT 0,
+                    is_premium    INTEGER DEFAULT 0,
+                    last_seen     TIMESTAMP,
+                    language      TEXT DEFAULT 'fa'
+                )
+            """)
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS downloads (
+                    id            SERIAL PRIMARY KEY,
+                    user_id       BIGINT NOT NULL,
+                    post_url      TEXT NOT NULL,
+                    platform      TEXT DEFAULT 'instagram',
+                    status        TEXT DEFAULT 'success',
+                    file_size_kb  INTEGER,
+                    download_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS settings (
+                    key   TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            """)
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS daily_quota (
+                    user_id      BIGINT NOT NULL,
+                    quota_date   DATE NOT NULL,
+                    count        INTEGER DEFAULT 0,
+                    PRIMARY KEY (user_id, quota_date)
+                )
+            """)
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS admins (
+                    user_id      BIGINT PRIMARY KEY,
+                    role         TEXT DEFAULT 'viewer',
+                    added_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    permissions  TEXT DEFAULT '{}',
+                    expire_date  TIMESTAMP
+                )
+            """)
+        else:
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id            INTEGER PRIMARY KEY,
+                    username      TEXT,
+                    first_name    TEXT,
+                    last_name     TEXT,
+                    joined_date   TEXT DEFAULT (datetime('now')),
+                    is_banned     INTEGER DEFAULT 0,
+                    is_premium    INTEGER DEFAULT 0,
+                    last_seen     TEXT,
+                    language      TEXT DEFAULT 'fa'
+                )
+            """)
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS downloads (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id       INTEGER NOT NULL,
+                    post_url      TEXT NOT NULL,
+                    platform      TEXT DEFAULT 'instagram',
+                    status        TEXT DEFAULT 'success',
+                    file_size_kb  INTEGER,
+                    download_date TEXT DEFAULT (datetime('now'))
+                )
+            """)
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS settings (
+                    key   TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            """)
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS daily_quota (
+                    user_id      INTEGER NOT NULL,
+                    quota_date   TEXT NOT NULL,
+                    count        INTEGER DEFAULT 0,
+                    PRIMARY KEY (user_id, quota_date)
+                )
+            """)
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS admins (
+                    user_id      INTEGER PRIMARY KEY,
+                    role         TEXT DEFAULT 'viewer',
+                    added_at     TEXT DEFAULT (datetime('now')),
+                    permissions  TEXT DEFAULT '{}',
+                    expire_date  TEXT
+                )
+            """)
+        
+        # ===== Default settings =====
         defaults = [
-            ("welcome_message", "👋 سلام! به ربات دانلود اینستاگرام خوش آمدید."),
             ("is_active", "True"),
             ("max_file_size", "50"),
             ("daily_quota", "10"),
@@ -113,241 +157,211 @@ def init_db() -> None:
             ("force_channels", ""),
             ("rate_limit_enabled", "False"),
             ("rate_limit_seconds", "30"),
-            ("admin_report_time", "08:00"),  # ساعت ارسال گزارش روزانه
         ]
-        c.executemany("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", defaults)
-
-        # ─── Seed admins from ADMIN_IDS ───
+        for key, value in defaults:
+            try:
+                if DB_TYPE == "postgres":
+                    c.execute("INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING", (key, value))
+                else:
+                    c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value))
+            except:
+                pass
+        
+        # ===== Seed admins =====
         for admin_id in ADMIN_IDS:
-            c.execute(
-                "INSERT OR IGNORE INTO admins (user_id, role, permissions, expire_date) VALUES (?, 'owner', ?, NULL)",
-                (admin_id, json.dumps({
-                    "can_view_stats": True,
-                    "can_send_broadcast": True,
-                    "can_manage_force_sub": True,
-                    "can_manage_settings": True,
-                    "can_manage_admins": True,
-                    "can_remove_owner": False
-                }))
-            )
-
-        c.execute("CREATE INDEX IF NOT EXISTS idx_downloads_user ON downloads(user_id);")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_downloads_date ON downloads(download_date DESC);")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);")
-
-    print(f"✅ Database initialized at {DB_PATH}")
-
+            try:
+                if DB_TYPE == "postgres":
+                    c.execute("""
+                        INSERT INTO admins (user_id, role, permissions, expire_date) 
+                        VALUES (%s, 'owner', %s, NULL) 
+                        ON CONFLICT (user_id) DO NOTHING
+                    """, (admin_id, json.dumps({
+                        "can_view_stats": True,
+                        "can_send_broadcast": True,
+                        "can_manage_force_sub": True,
+                        "can_manage_settings": True,
+                        "can_manage_admins": True,
+                        "can_remove_owner": False
+                    })))
+                else:
+                    c.execute("""
+                        INSERT OR IGNORE INTO admins (user_id, role, permissions, expire_date) 
+                        VALUES (?, 'owner', ?, NULL)
+                    """, (admin_id, json.dumps({
+                        "can_view_stats": True,
+                        "can_send_broadcast": True,
+                        "can_manage_force_sub": True,
+                        "can_manage_settings": True,
+                        "can_manage_admins": True,
+                        "can_remove_owner": False
+                    })))
+            except:
+                pass
+        
+        if DB_TYPE == "postgres":
+            c.execute("CREATE INDEX IF NOT EXISTS idx_downloads_user ON downloads(user_id);")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_downloads_date ON downloads(download_date DESC);")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);")
+        else:
+            c.execute("CREATE INDEX IF NOT EXISTS idx_downloads_user ON downloads(user_id);")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_downloads_date ON downloads(download_date DESC);")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);")
+        
+        conn.commit()
+    
+    print(f"✅ Database initialized ({DB_TYPE})")
 
 # ============================================================
-#  Users (با پشتیبانی از زبان)
+#  توابع اصلی (مشترک بین SQLite و PostgreSQL)
 # ============================================================
+
 def add_user(user_id: int, username: Optional[str], first_name: Optional[str],
              last_name: Optional[str], language: str = "fa") -> None:
-    with _write_lock, get_conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO users (id, username, first_name, last_name, last_seen, language)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                username   = excluded.username,
-                first_name = excluded.first_name,
-                last_name  = excluded.last_name,
-                last_seen  = excluded.last_seen
-            """,
-            (user_id, username, first_name, last_name, _now_iso(), language),
-        )
-
-def get_user_language(user_id: int) -> str:
     with get_conn() as conn:
-        row = conn.execute("SELECT language FROM users WHERE id = ?", (user_id,)).fetchone()
-        return row["language"] if row else "fa"
-
-def set_user_language(user_id: int, language: str) -> None:
-    with _write_lock, get_conn() as conn:
-        conn.execute("UPDATE users SET language = ? WHERE id = ?", (language, user_id))
-
-def is_banned(user_id: int) -> bool:
-    with get_conn() as conn:
-        row = conn.execute("SELECT is_banned FROM users WHERE id = ?", (user_id,)).fetchone()
-        return bool(row and row["is_banned"])
-
-def ban_user(user_id: int) -> None:
-    with _write_lock, get_conn() as conn:
-        conn.execute("UPDATE users SET is_banned = 1 WHERE id = ?", (user_id,))
-
-def unban_user(user_id: int) -> None:
-    with _write_lock, get_conn() as conn:
-        conn.execute("UPDATE users SET is_banned = 0 WHERE id = ?", (user_id,))
+        c = conn.cursor()
+        if DB_TYPE == "postgres":
+            c.execute("""
+                INSERT INTO users (id, username, first_name, last_name, last_seen, language)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    username = EXCLUDED.username,
+                    first_name = EXCLUDED.first_name,
+                    last_name = EXCLUDED.last_name,
+                    last_seen = EXCLUDED.last_seen
+            """, (user_id, username, first_name, last_name, _now_iso(), language))
+        else:
+            c.execute("""
+                INSERT INTO users (id, username, first_name, last_name, last_seen, language)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    username = excluded.username,
+                    first_name = excluded.first_name,
+                    last_name = excluded.last_name,
+                    last_seen = excluded.last_seen
+            """, (user_id, username, first_name, last_name, _now_iso(), language))
+        conn.commit()
 
 def get_user(user_id: int) -> Optional[Dict[str, Any]]:
     with get_conn() as conn:
-        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-        return dict(row) if row else None
-
-def get_users_paginated(
-    page: int = 1, size: int = 50, search: str = ""
-) -> Tuple[List[Dict[str, Any]], int]:
-    offset = max(0, (page - 1) * size)
-    with get_conn() as conn:
-        if search:
-            like = f"%{search}%"
-            total = conn.execute(
-                "SELECT COUNT(*) FROM users WHERE username LIKE ? OR first_name LIKE ? OR last_name LIKE ? OR CAST(id AS TEXT) LIKE ?",
-                (like, like, like, like),
-            ).fetchone()[0]
-            rows = conn.execute(
-                "SELECT * FROM users WHERE username LIKE ? OR first_name LIKE ? OR last_name LIKE ? OR CAST(id AS TEXT) LIKE ? ORDER BY joined_date DESC LIMIT ? OFFSET ?",
-                (like, like, like, like, size, offset),
-            ).fetchall()
+        c = conn.cursor()
+        if DB_TYPE == "postgres":
+            c.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+            row = c.fetchone()
+            if row:
+                return dict_factory(c, row)
         else:
-            total = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-            rows = conn.execute("SELECT * FROM users ORDER BY joined_date DESC LIMIT ? OFFSET ?", (size, offset)).fetchall()
-        return [dict(r) for r in rows], total
+            c.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+            row = c.fetchone()
+            if row:
+                return dict(row)
+        return None
 
-
-# ============================================================
-#  Downloads
-# ============================================================
-def add_download(user_id: int, post_url: str, platform: str = "instagram",
-                 status: str = "success", file_size_kb: Optional[int] = None) -> None:
-    with _write_lock, get_conn() as conn:
-        conn.execute(
-            "INSERT INTO downloads (user_id, post_url, platform, status, file_size_kb) VALUES (?, ?, ?, ?, ?)",
-            (user_id, post_url, platform, status, file_size_kb),
-        )
-
-def get_recent_downloads(limit: int = 10) -> List[Dict[str, Any]]:
+def get_user_language(user_id: int) -> str:
     with get_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT d.*, u.username, u.first_name
-            FROM downloads d
-            LEFT JOIN users u ON d.user_id = u.id
-            ORDER BY d.download_date DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
-        return [dict(r) for r in rows]
+        c = conn.cursor()
+        if DB_TYPE == "postgres":
+            c.execute("SELECT language FROM users WHERE id = %s", (user_id,))
+            row = c.fetchone()
+            return row[0] if row else "fa"
+        else:
+            c.execute("SELECT language FROM users WHERE id = ?", (user_id,))
+            row = c.fetchone()
+            return row["language"] if row else "fa"
 
-def get_downloads_paginated(
-    page: int = 1, size: int = 50
-) -> Tuple[List[Dict[str, Any]], int]:
-    offset = max(0, (page - 1) * size)
+def set_user_language(user_id: int, language: str) -> None:
     with get_conn() as conn:
-        total = conn.execute("SELECT COUNT(*) FROM downloads").fetchone()[0]
-        rows = conn.execute(
-            """
-            SELECT d.*, u.username, u.first_name
-            FROM downloads d
-            LEFT JOIN users u ON d.user_id = u.id
-            ORDER BY d.download_date DESC
-            LIMIT ? OFFSET ?
-            """,
-            (size, offset),
-        ).fetchall()
-        return [dict(r) for r in rows], total
+        c = conn.cursor()
+        if DB_TYPE == "postgres":
+            c.execute("UPDATE users SET language = %s WHERE id = %s", (language, user_id))
+        else:
+            c.execute("UPDATE users SET language = ? WHERE id = ?", (language, user_id))
+        conn.commit()
 
-def increment_download(user_id: int) -> None:
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    with _write_lock, get_conn() as conn:
-        conn.execute(
-            "INSERT INTO downloads (user_id, post_url, platform, status) VALUES (?, '', 'instagram', 'success')",
-            (user_id,)
-        )
-        conn.execute(
-            """
-            INSERT INTO daily_quota (user_id, quota_date, count)
-            VALUES (?, ?, 1)
-            ON CONFLICT(user_id, quota_date) DO UPDATE SET count = count + 1
-            """,
-            (user_id, today),
-        )
-
-def get_total_downloads() -> int:
+def get_all_users() -> List[Dict[str, Any]]:
     with get_conn() as conn:
-        row = conn.execute("SELECT COUNT(*) FROM downloads").fetchone()
-        return row[0] if row else 0
+        c = conn.cursor()
+        if DB_TYPE == "postgres":
+            c.execute("SELECT * FROM users ORDER BY joined_date DESC")
+            rows = c.fetchall()
+            return [dict_factory(c, row) for row in rows]
+        else:
+            c.execute("SELECT * FROM users ORDER BY joined_date DESC")
+            rows = c.fetchall()
+            return [dict(row) for row in rows]
 
-
-# ============================================================
-#  Settings
-# ============================================================
-def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
+def get_user_count() -> int:
     with get_conn() as conn:
-        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
-        return row["value"] if row else default
+        c = conn.cursor()
+        if DB_TYPE == "postgres":
+            c.execute("SELECT COUNT(*) FROM users")
+            return c.fetchone()[0]
+        else:
+            c.execute("SELECT COUNT(*) FROM users")
+            return c.fetchone()[0]
 
-def set_setting(key: str, value: str) -> None:
-    with _write_lock, get_conn() as conn:
-        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
-
-def get_all_settings() -> Dict[str, str]:
+def get_all_admins() -> List[Dict[str, Any]]:
     with get_conn() as conn:
-        rows = conn.execute("SELECT key, value FROM settings").fetchall()
-        return {r["key"]: r["value"] for r in rows}
+        c = conn.cursor()
+        if DB_TYPE == "postgres":
+            c.execute("""
+                SELECT a.user_id, a.role, a.added_at, a.permissions, a.expire_date,
+                       u.username, u.first_name, u.last_name
+                FROM admins a
+                LEFT JOIN users u ON a.user_id = u.id
+                ORDER BY a.added_at ASC
+            """)
+            rows = c.fetchall()
+            result = []
+            for row in rows:
+                d = dict_factory(c, row)
+                if d['user_id'] in ADMIN_IDS:
+                    d['role'] = 'owner'
+                result.append(d)
+            return result
+        else:
+            c.execute("""
+                SELECT a.user_id, a.role, a.added_at, a.permissions, a.expire_date,
+                       u.username, u.first_name, u.last_name
+                FROM admins a
+                LEFT JOIN users u ON a.user_id = u.id
+                ORDER BY a.added_at ASC
+            """)
+            rows = c.fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                if d['user_id'] in ADMIN_IDS:
+                    d['role'] = 'owner'
+                result.append(d)
+            return result
 
-
-# ============================================================
-#  Daily quota
-# ============================================================
-def _today_str() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-def get_quota(user_id: int) -> int:
-    today = _today_str()
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT count FROM daily_quota WHERE user_id = ? AND quota_date = ?",
-            (user_id, today),
-        ).fetchone()
-        return row["count"] if row else 0
-
-def increment_quota(user_id: int) -> int:
-    today = _today_str()
-    with _write_lock, get_conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO daily_quota (user_id, quota_date, count)
-            VALUES (?, ?, 1)
-            ON CONFLICT(user_id, quota_date) DO UPDATE SET count = count + 1
-            """,
-            (user_id, today),
-        )
-        row = conn.execute(
-            "SELECT count FROM daily_quota WHERE user_id = ? AND quota_date = ?",
-            (user_id, today),
-        ).fetchone()
-        return row["count"] if row else 1
-
-def check_quota(user_id: int) -> Tuple[bool, int, int]:
-    limit_str = get_setting("daily_quota", "10")
-    limit = int(limit_str) if limit_str else 10
-    used = get_quota(user_id)
-    user = get_user(user_id)
-    if user and user.get("is_premium"):
-        return True, used, 0
-    if limit <= 0:
-        return True, used, 0
-    return (used < limit), used, limit
-
-
-# ============================================================
-#  Stats
-# ============================================================
 def get_stats() -> Dict[str, int]:
     with get_conn() as conn:
-        users = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-        downloads = conn.execute("SELECT COUNT(*) FROM downloads").fetchone()[0]
-        banned = conn.execute("SELECT COUNT(*) FROM users WHERE is_banned = 1").fetchone()[0]
-        today = _today_str()
-        today_downloads = conn.execute(
-            "SELECT COUNT(*) FROM downloads WHERE date(download_date) = ?",
-            (today,),
-        ).fetchone()[0]
-        active_users_7d = conn.execute(
-            "SELECT COUNT(DISTINCT user_id) FROM downloads WHERE download_date >= datetime('now', '-7 days')"
-        ).fetchone()[0]
+        c = conn.cursor()
+        if DB_TYPE == "postgres":
+            c.execute("SELECT COUNT(*) FROM users")
+            users = c.fetchone()[0]
+            c.execute("SELECT COUNT(*) FROM downloads")
+            downloads = c.fetchone()[0]
+            c.execute("SELECT COUNT(*) FROM users WHERE is_banned = 1")
+            banned = c.fetchone()[0]
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            c.execute("SELECT COUNT(*) FROM downloads WHERE DATE(download_date) = %s", (today,))
+            today_downloads = c.fetchone()[0]
+            c.execute("SELECT COUNT(DISTINCT user_id) FROM downloads WHERE download_date >= NOW() - INTERVAL '7 days'")
+            active_users_7d = c.fetchone()[0]
+        else:
+            c.execute("SELECT COUNT(*) FROM users")
+            users = c.fetchone()[0]
+            c.execute("SELECT COUNT(*) FROM downloads")
+            downloads = c.fetchone()[0]
+            c.execute("SELECT COUNT(*) FROM users WHERE is_banned = 1")
+            banned = c.fetchone()[0]
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            c.execute("SELECT COUNT(*) FROM downloads WHERE date(download_date) = ?", (today,))
+            today_downloads = c.fetchone()[0]
+            c.execute("SELECT COUNT(DISTINCT user_id) FROM downloads WHERE download_date >= datetime('now', '-7 days')")
+            active_users_7d = c.fetchone()[0]
         return {
             "users": users,
             "downloads": downloads,
@@ -356,62 +370,124 @@ def get_stats() -> Dict[str, int]:
             "active_users_7d": active_users_7d,
         }
 
-def get_daily_download_series(days: int = 30) -> List[Dict[str, Any]]:
+def get_total_downloads() -> int:
     with get_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT date(download_date) as d, COUNT(*) as c
-            FROM downloads
-            WHERE download_date >= datetime('now', ?)
-            GROUP BY date(download_date)
-            ORDER BY d ASC
-            """,
-            (f"-{days} days",),
-        ).fetchall()
-        return [{"date": r["d"], "count": r["c"]} for r in rows]
+        c = conn.cursor()
+        if DB_TYPE == "postgres":
+            c.execute("SELECT COUNT(*) FROM downloads")
+            return c.fetchone()[0]
+        else:
+            c.execute("SELECT COUNT(*) FROM downloads")
+            return c.fetchone()[0]
 
+def increment_download(user_id: int) -> None:
+    with get_conn() as conn:
+        c = conn.cursor()
+        if DB_TYPE == "postgres":
+            c.execute("INSERT INTO downloads (user_id, post_url, platform, status) VALUES (%s, '', 'instagram', 'success')", (user_id,))
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            c.execute("""
+                INSERT INTO daily_quota (user_id, quota_date, count) 
+                VALUES (%s, %s, 1) 
+                ON CONFLICT (user_id, quota_date) DO UPDATE SET count = count + 1
+            """, (user_id, today))
+        else:
+            c.execute("INSERT INTO downloads (user_id, post_url, platform, status) VALUES (?, '', 'instagram', 'success')", (user_id,))
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            c.execute("""
+                INSERT INTO daily_quota (user_id, quota_date, count) 
+                VALUES (?, ?, 1) 
+                ON CONFLICT(user_id, quota_date) DO UPDATE SET count = count + 1
+            """, (user_id, today))
+        conn.commit()
 
-# ============================================================
-#  Admins (RBAC با تاریخ انقضا)
-# ============================================================
+def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
+    with get_conn() as conn:
+        c = conn.cursor()
+        if DB_TYPE == "postgres":
+            c.execute("SELECT value FROM settings WHERE key = %s", (key,))
+            row = c.fetchone()
+            return row[0] if row else default
+        else:
+            c.execute("SELECT value FROM settings WHERE key = ?", (key,))
+            row = c.fetchone()
+            return row["value"] if row else default
+
+def set_setting(key: str, value: str) -> None:
+    with get_conn() as conn:
+        c = conn.cursor()
+        if DB_TYPE == "postgres":
+            c.execute("INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = %s", (key, value, value))
+        else:
+            c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
+        conn.commit()
+
+def get_force_channels_list() -> List[str]:
+    channels_str = get_setting("force_channels", "")
+    if not channels_str:
+        return []
+    return [ch.strip() for ch in channels_str.split(",") if ch.strip()]
+
+def add_force_channel(channel: str) -> None:
+    channels = get_force_channels_list()
+    if channel not in channels:
+        channels.append(channel)
+        set_setting("force_channels", ",".join(channels))
+
+def remove_force_channel(channel: str) -> bool:
+    channels = get_force_channels_list()
+    if channel in channels:
+        channels.remove(channel)
+        set_setting("force_channels", ",".join(channels))
+        return True
+    return False
+
 def is_admin(user_id: int) -> bool:
     if user_id in ADMIN_IDS:
         return True
     with get_conn() as conn:
-        row = conn.execute("SELECT 1 FROM admins WHERE user_id = ?", (user_id,)).fetchone()
-        return row is not None
+        c = conn.cursor()
+        if DB_TYPE == "postgres":
+            c.execute("SELECT 1 FROM admins WHERE user_id = %s", (user_id,))
+            return c.fetchone() is not None
+        else:
+            c.execute("SELECT 1 FROM admins WHERE user_id = ?", (user_id,))
+            return c.fetchone() is not None
 
-def get_admin_role(user_id: int) -> Optional[str]:
-    if user_id in ADMIN_IDS:
-        return "owner"
+def add_admin(user_id: int, role: str = "viewer") -> None:
+    perms = {
+        "can_view_stats": True,
+        "can_send_broadcast": False,
+        "can_manage_force_sub": False,
+        "can_manage_settings": False,
+        "can_manage_admins": False,
+        "can_remove_owner": False
+    }
     with get_conn() as conn:
-        row = conn.execute("SELECT role FROM admins WHERE user_id = ?", (user_id,)).fetchone()
-        return row["role"] if row else None
+        c = conn.cursor()
+        if DB_TYPE == "postgres":
+            c.execute("""
+                INSERT INTO admins (user_id, role, permissions) 
+                VALUES (%s, %s, %s) 
+                ON CONFLICT (user_id) DO UPDATE SET role = %s, permissions = %s
+            """, (user_id, role, json.dumps(perms), role, json.dumps(perms)))
+        else:
+            c.execute("""
+                INSERT OR REPLACE INTO admins (user_id, role, permissions) 
+                VALUES (?, ?, ?)
+            """, (user_id, role, json.dumps(perms)))
+        conn.commit()
 
-def get_admin_expire_date(user_id: int) -> Optional[str]:
-    if user_id in ADMIN_IDS:
-        return None  # owner هیچوقت منقضی نمیشه
-    with get_conn() as conn:
-        row = conn.execute("SELECT expire_date FROM admins WHERE user_id = ?", (user_id,)).fetchone()
-        return row["expire_date"] if row else None
-
-def set_admin_expire_date(user_id: int, expire_date: Optional[str]) -> None:
+def remove_admin(user_id: int) -> None:
     if user_id in ADMIN_IDS:
         return
-    with _write_lock, get_conn() as conn:
-        conn.execute("UPDATE admins SET expire_date = ? WHERE user_id = ?", (expire_date, user_id))
-
-def is_admin_expired(user_id: int) -> bool:
-    if user_id in ADMIN_IDS:
-        return False
-    expire_date = get_admin_expire_date(user_id)
-    if not expire_date:
-        return False
-    try:
-        expire = datetime.fromisoformat(expire_date)
-        return datetime.now(timezone.utc) > expire
-    except:
-        return False
+    with get_conn() as conn:
+        c = conn.cursor()
+        if DB_TYPE == "postgres":
+            c.execute("DELETE FROM admins WHERE user_id = %s", (user_id,))
+        else:
+            c.execute("DELETE FROM admins WHERE user_id = ?", (user_id,))
+        conn.commit()
 
 def get_admin_permissions(user_id: int) -> Dict[str, bool]:
     if user_id in ADMIN_IDS:
@@ -423,35 +499,6 @@ def get_admin_permissions(user_id: int) -> Dict[str, bool]:
             "can_manage_admins": True,
             "can_remove_owner": False
         }
-    # اگر منقضی شده باشه، همه دسترسی‌ها رو false برمی‌گردونیم
-    if is_admin_expired(user_id):
-        return {
-            "can_view_stats": False,
-            "can_send_broadcast": False,
-            "can_manage_force_sub": False,
-            "can_manage_settings": False,
-            "can_manage_admins": False,
-            "can_remove_owner": False
-        }
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT permissions FROM admins WHERE user_id = ?", (user_id,)
-        ).fetchone()
-        if row and row["permissions"]:
-            try:
-                stored_perms = json.loads(row["permissions"])
-                default_perms = {
-                    "can_view_stats": True,
-                    "can_send_broadcast": False,
-                    "can_manage_force_sub": False,
-                    "can_manage_settings": False,
-                    "can_manage_admins": False,
-                    "can_remove_owner": False
-                }
-                default_perms.update(stored_perms)
-                return default_perms
-            except json.JSONDecodeError:
-                pass
     default = {
         "can_view_stats": True,
         "can_send_broadcast": False,
@@ -460,110 +507,54 @@ def get_admin_permissions(user_id: int) -> Dict[str, bool]:
         "can_manage_admins": False,
         "can_remove_owner": False
     }
+    with get_conn() as conn:
+        c = conn.cursor()
+        if DB_TYPE == "postgres":
+            c.execute("SELECT permissions FROM admins WHERE user_id = %s", (user_id,))
+            row = c.fetchone()
+            if row and row[0]:
+                try:
+                    perms = json.loads(row[0])
+                    default.update(perms)
+                except:
+                    pass
+        else:
+            c.execute("SELECT permissions FROM admins WHERE user_id = ?", (user_id,))
+            row = c.fetchone()
+            if row and row["permissions"]:
+                try:
+                    perms = json.loads(row["permissions"])
+                    default.update(perms)
+                except:
+                    pass
     return default
 
 def update_admin_permissions(user_id: int, permissions: Dict[str, bool]) -> bool:
     if user_id in ADMIN_IDS:
         return False
-    try:
-        perms_json = json.dumps(permissions)
-        with _write_lock, get_conn() as conn:
-            cursor = conn.execute(
-                "UPDATE admins SET permissions = ? WHERE user_id = ?",
-                (perms_json, user_id)
-            )
-            return cursor.rowcount > 0
-    except Exception as e:
-        logger.error(f"Error updating permissions for {user_id}: {e}")
-        return False
-
-def add_admin(user_id: int, role: str = "viewer", permissions: Optional[Dict[str, bool]] = None,
-              expire_date: Optional[str] = None) -> None:
-    if permissions is None:
-        permissions = {
-            "can_view_stats": True,
-            "can_send_broadcast": False,
-            "can_manage_force_sub": False,
-            "can_manage_settings": False,
-            "can_manage_admins": False,
-            "can_remove_owner": False
-        }
-    with _write_lock, get_conn() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO admins (user_id, role, permissions, expire_date) VALUES (?, ?, ?, ?)",
-            (user_id, role, json.dumps(permissions), expire_date)
-        )
-
-def remove_admin(user_id: int) -> None:
-    if user_id in ADMIN_IDS:
-        return
-    with _write_lock, get_conn() as conn:
-        conn.execute("DELETE FROM admins WHERE user_id = ?", (user_id,))
-
-def get_all_admins() -> List[Dict[str, Any]]:
     with get_conn() as conn:
-        rows = conn.execute("""
-            SELECT a.user_id, a.role, a.added_at, a.permissions, a.expire_date,
-                   u.username, u.first_name, u.last_name
-            FROM admins a
-            LEFT JOIN users u ON a.user_id = u.id
-            ORDER BY a.added_at ASC
-        """).fetchall()
-        result = []
-        for r in rows:
-            d = dict(r)
-            if d['user_id'] in ADMIN_IDS:
-                d['role'] = 'owner'
-                d['permissions'] = json.dumps({
-                    "can_view_stats": True,
-                    "can_send_broadcast": True,
-                    "can_manage_force_sub": True,
-                    "can_manage_settings": True,
-                    "can_manage_admins": True,
-                    "can_remove_owner": False
-                })
-                d['expire_date'] = None
-            result.append(d)
-        return result
+        c = conn.cursor()
+        if DB_TYPE == "postgres":
+            c.execute("UPDATE admins SET permissions = %s WHERE user_id = %s", (json.dumps(permissions), user_id))
+        else:
+            c.execute("UPDATE admins SET permissions = ? WHERE user_id = ?", (json.dumps(permissions), user_id))
+        conn.commit()
+        return True
 
-def is_super_admin(user_id: int) -> bool:
+def get_admin_role(user_id: int) -> Optional[str]:
     if user_id in ADMIN_IDS:
-        return True
+        return "owner"
     with get_conn() as conn:
-        row = conn.execute("SELECT role FROM admins WHERE user_id = ?", (user_id,)).fetchone()
-        return row and row["role"] in ["super", "owner"]
+        c = conn.cursor()
+        if DB_TYPE == "postgres":
+            c.execute("SELECT role FROM admins WHERE user_id = %s", (user_id,))
+            row = c.fetchone()
+            return row[0] if row else None
+        else:
+            c.execute("SELECT role FROM admins WHERE user_id = ?", (user_id,))
+            row = c.fetchone()
+            return row["role"] if row else None
 
-
-# ============================================================
-#  Force Subscribe (با ذخیره اسم کانال)
-# ============================================================
-def get_force_channels_list() -> List[str]:
-    channels_str = get_setting("force_channels", "")
-    if not channels_str:
-        return []
-    return [ch.strip() for ch in channels_str.split(",") if ch.strip()]
-
-def set_force_channels_list(channels: List[str]) -> None:
-    set_setting("force_channels", ",".join(channels))
-
-def add_force_channel(channel: str) -> None:
-    channels = get_force_channels_list()
-    if channel not in channels:
-        channels.append(channel)
-        set_force_channels_list(channels)
-
-def remove_force_channel(channel: str) -> bool:
-    channels = get_force_channels_list()
-    if channel in channels:
-        channels.remove(channel)
-        set_force_channels_list(channels)
-        return True
-    return False
-
-
-# ============================================================
-#  Rate Limit
-# ============================================================
 def get_rate_limit_enabled() -> bool:
     val = get_setting("rate_limit_enabled", "False")
     return val.lower() == "true"
@@ -580,28 +571,3 @@ def get_rate_limit_seconds() -> int:
 
 def set_rate_limit_seconds(seconds: int) -> None:
     set_setting("rate_limit_seconds", str(seconds))
-
-
-# ============================================================
-#  Broadcast
-# ============================================================
-def get_all_user_ids(include_banned: bool = False) -> List[int]:
-    with get_conn() as conn:
-        if include_banned:
-            rows = conn.execute("SELECT id FROM users").fetchall()
-        else:
-            rows = conn.execute("SELECT id FROM users WHERE is_banned = 0").fetchall()
-        return [r["id"] for r in rows]
-
-def get_all_users() -> List[Dict[str, Any]]:
-    with get_conn() as conn:
-        rows = conn.execute("SELECT * FROM users ORDER BY joined_date DESC").fetchall()
-        return [dict(r) for r in rows]
-
-def get_user_count() -> int:
-    with get_conn() as conn:
-        row = conn.execute("SELECT COUNT(*) FROM users").fetchone()
-        return row[0] if row else 0
-
-def get_all_users_count() -> int:
-    return get_user_count()

@@ -312,6 +312,25 @@ def get_force_sub_keyboard(channels):
     keyboard.add(btn_verify)
     return keyboard
 
+def get_force_sub_inline_keyboard(channels, lang: str = "fa"):
+    """دکمه‌های مدیریت قفل اسپانسر (اضافه/حذف کانال)"""
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    for channel in channels:
+        if lang == "en":
+            btn_remove = InlineKeyboardButton(f"❌ Remove {channel}", callback_data=f"force_sub_remove_{channel}")
+        else:
+            btn_remove = InlineKeyboardButton(f"❌ حذف {channel}", callback_data=f"force_sub_remove_{channel}")
+        keyboard.add(btn_remove)
+    if lang == "en":
+        btn_add = InlineKeyboardButton("➕ Add Channel", callback_data="force_sub_add")
+        btn_back = InlineKeyboardButton("🔙 Back", callback_data="admin_back")
+    else:
+        btn_add = InlineKeyboardButton("➕ افزودن کانال", callback_data="force_sub_add")
+        btn_back = InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")
+    keyboard.add(btn_add)
+    keyboard.add(btn_back)
+    return keyboard
+
 def get_confirm_keyboard(lang: str = "fa"):
     keyboard = InlineKeyboardMarkup(row_width=2)
     if lang == "en":

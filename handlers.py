@@ -296,10 +296,8 @@ def start_broadcast(bot, chat_id, user_data=None):
             get_message("broadcast_prompt", lang),
             reply_markup=keyboard
         )
-        # ذخیره مرحله در user_data (که از app.py اومده)
         if user_data is not None:
             user_data[chat_id] = {'step': 'broadcast', 'message_id': msg.message_id}
-        # همچنین در bot.user_data برای سازگاری
         if not hasattr(bot, 'user_data'):
             bot.user_data = {}
         bot.user_data[chat_id] = {'step': 'broadcast', 'message_id': msg.message_id}
@@ -312,7 +310,6 @@ def process_broadcast_message(bot, message, user_data):
     broadcast_text = message.text
     lang = get_user_language(chat_id) or "fa"
     
-    # حذف پیام پرامپت قبلی
     try:
         if chat_id in user_data and 'message_id' in user_data[chat_id]:
             bot.delete_message(chat_id, user_data[chat_id]['message_id'])
@@ -444,19 +441,16 @@ def handle_callback_query(bot, call, user_data):
     
     logging.info(f"📞 Callback: {data} from {user_id}")
     
-    if not is_admin(user_id):
-        bot.answer_callback_query(call.id, "⛔ شما دسترسی ادمین ندارید!", show_alert=True)
-        return
-    
-    # ===== انتخاب زبان =====
+    # ===== انتخاب زبان (برای همه کاربران، نه فقط ادمین) =====
     if data == "lang_fa":
         set_user_language(user_id, "fa")
         bot.answer_callback_query(call.id, MESSAGES_FA.get("lang_changed", "زبان تغییر کرد."), show_alert=True)
         bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
+        # ارسال منوی اصلی با زبان جدید
         lang = "fa"
-        keyboard = get_admin_inline_keyboard(lang)
+        keyboard = get_language_keyboard()
         bot.edit_message_text(
-            MESSAGES_FA.get("admin_welcome", "🛠 به پنل مدیریت خوش آمدید."),
+            get_message("lang_selection", lang),
             chat_id,
             message_id,
             reply_markup=keyboard,
@@ -468,14 +462,19 @@ def handle_callback_query(bot, call, user_data):
         bot.answer_callback_query(call.id, MESSAGES_EN.get("lang_changed_en", "Language changed."), show_alert=True)
         bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
         lang = "en"
-        keyboard = get_admin_inline_keyboard(lang)
+        keyboard = get_language_keyboard()
         bot.edit_message_text(
-            MESSAGES_EN.get("admin_welcome", "🛠 Welcome to Admin Panel."),
+            get_message("lang_selection", lang),
             chat_id,
             message_id,
             reply_markup=keyboard,
             parse_mode='HTML'
         )
+        return
+    
+    # ===== بقیه عملیات فقط برای ادمین‌ها =====
+    if not is_admin(user_id):
+        bot.answer_callback_query(call.id, "⛔ شما دسترسی ادمین ندارید!", show_alert=True)
         return
     
     # ===== بروزرسانی آمار =====
@@ -979,6 +978,7 @@ def handle_message(bot, message, user_data, user_last_download=None):
         bot.send_message(chat_id, get_message("lang_selection", "fa"), reply_markup=keyboard)
         return
     
+    # ===== /language =====
     if text and text.startswith('/language'):
         keyboard = get_language_keyboard()
         bot.send_message(chat_id, get_message("lang_prompt", lang), reply_markup=keyboard)

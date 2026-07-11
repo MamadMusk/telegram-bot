@@ -17,6 +17,7 @@ from messages import (
     get_rate_limit_keyboard, get_admin_permissions_keyboard,
     get_broadcast_progress_keyboard, get_broadcast_cancel_keyboard,
     get_admin_inline_keyboard, get_language_keyboard,
+    get_settings_new_keyboard,
     COMMANDS_FA, COMMANDS_EN
 )
 from database import (
@@ -255,26 +256,32 @@ def show_force_sub_settings(bot, chat_id, message_id=None):
     except Exception as e:
         logging.error(f"Error in show_force_sub_settings: {e}")
 
+# ===================================================
+# 📊 تنظیمات جدید
+# ===================================================
 def show_settings(bot, chat_id, message_id=None):
     try:
         lang = get_user_language(chat_id) or "fa"
-        channels = get_force_channels()
-        channels_text = ", ".join(channels) if channels else "❌ هیچ"
+        
+        # دریافت مقادیر فعلی
         daily_quota = get_setting("daily_quota", "10")
         max_file_size = get_setting("max_file_size", "50")
-        is_active = get_setting("is_active", "True")
+        is_active = get_setting("is_active", "True") == "True"
         rate_limit_enabled = get_rate_limit_enabled()
         rate_limit_seconds = get_rate_limit_seconds()
         
-        text = get_message("settings_list", lang).format(
-            channels=channels_text,
+        # دریافت متن تنظیمات از messages.py
+        text = get_message("settings_text", lang)
+        
+        keyboard = get_settings_new_keyboard(
+            lang=lang,
             daily_quota=daily_quota,
             max_file_size=max_file_size,
-            is_active="🟢 فعال" if is_active == "True" else "🔴 غیرفعال",
-            rate_limit_status="🟢 فعال" if rate_limit_enabled else "🔴 غیرفعال",
+            is_active=is_active,
+            rate_limit_enabled=rate_limit_enabled,
             rate_limit_seconds=rate_limit_seconds
         )
-        keyboard = get_settings_inline_keyboard(lang)
+        
         if message_id:
             bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
         else:
@@ -457,38 +464,29 @@ def handle_callback_query(bot, call, user_data):
     
     logging.info(f"📞 Callback: {data} from {user_id}")
     
-    # ===== انتخاب زبان (برای همه کاربران) =====
+    # ===== انتخاب زبان =====
     if data == "lang_fa":
         set_user_language(user_id, "fa")
         bot.answer_callback_query(call.id, MESSAGES_FA.get("lang_changed", "زبان تغییر کرد."), show_alert=True)
-        
         try:
             bot.set_my_commands(COMMANDS_FA)
             bot.set_chat_menu_button(chat_id, menu_button=MenuButtonCommands())
             logging.info("✅ کامندها به فارسی تغییر کرد و دکمه‌ی منو تنظیم شد")
         except Exception as e:
             logging.error(f"❌ خطا در تغییر کامندها: {e}")
-        
         bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
-        
-        # ===== ارسال پیام خوش‌آمدگویی با زبان فارسی =====
         send_welcome_message(bot, chat_id, user_id, "fa")
         return
-    
     elif data == "lang_en":
         set_user_language(user_id, "en")
         bot.answer_callback_query(call.id, MESSAGES_EN.get("lang_changed_en", "Language changed."), show_alert=True)
-        
         try:
             bot.set_my_commands(COMMANDS_EN)
             bot.set_chat_menu_button(chat_id, menu_button=MenuButtonCommands())
             logging.info("✅ Commands changed to English and menu button set")
         except Exception as e:
             logging.error(f"❌ Error changing commands: {e}")
-        
         bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
-        
-        # ===== ارسال پیام خوش‌آمدگویی با زبان انگلیسی =====
         send_welcome_message(bot, chat_id, user_id, "en")
         return
     
@@ -503,7 +501,7 @@ def handle_callback_query(bot, call, user_data):
         show_stats(bot, chat_id, message_id)
         return
     
-    # ===== منوی اصلی مدیریت (از دکمه‌های Inline) =====
+    # ===== منوی اصلی مدیریت =====
     if data == "admin_stats":
         bot.answer_callback_query(call.id, "📊 آماده...", show_alert=False)
         show_stats(bot, chat_id, message_id)
@@ -569,21 +567,17 @@ def handle_callback_query(bot, call, user_data):
         if not is_owner(user_id) and not has_permission(user_id, "can_manage_admins"):
             bot.answer_callback_query(call.id, get_message("admin_no_permission", lang), show_alert=True)
             return
-        
         if admin_id == OWNER_ID:
             bot.answer_callback_query(call.id, get_message("admin_cant_remove_owner", lang), show_alert=True)
             return
-        
         perms = get_admin_permissions(admin_id)
         old_value = perms.get(perm_key, False)
         new_value = not old_value
         perms[perm_key] = new_value
         success = update_admin_permissions(admin_id, perms)
-        
         if not success:
             bot.answer_callback_query(call.id, "❌ خطا در ذخیره دسترسی!", show_alert=True)
             return
-        
         admin_info = get_user(admin_id)
         name = admin_info.get('first_name', 'Unknown') if admin_info else 'Unknown'
         role = get_admin_role(admin_id) or 'viewer'
@@ -598,7 +592,6 @@ def handle_callback_query(bot, call, user_data):
             admins="✅" if perms.get("can_manage_admins", False) else "❌"
         )
         keyboard = get_admin_permissions_keyboard(admin_id, perms, is_owner=False, lang=lang)
-        
         try:
             bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=keyboard)
             perm_names = {
@@ -608,18 +601,10 @@ def handle_callback_query(bot, call, user_data):
                 "can_manage_settings": "تنظیمات",
                 "can_manage_admins": "مدیریت ادمین‌ها"
             }
-            bot.answer_callback_query(
-                call.id,
-                f"✅ {perm_names.get(perm_key, perm_key)} {'فعال' if new_value else 'غیرفعال'} شد!",
-                show_alert=False
-            )
+            bot.answer_callback_query(call.id, f"✅ {perm_names.get(perm_key, perm_key)} {'فعال' if new_value else 'غیرفعال'} شد!", show_alert=False)
         except Exception as e:
             if "message is not modified" in str(e):
-                bot.answer_callback_query(
-                    call.id,
-                    f"ℹ️ دسترسی قبلاً {'فعال' if old_value else 'غیرفعال'} بود!",
-                    show_alert=False
-                )
+                bot.answer_callback_query(call.id, f"ℹ️ دسترسی قبلاً {'فعال' if old_value else 'غیرفعال'} بود!", show_alert=False)
             else:
                 logging.error(f"❌ Error in perm toggle: {e}")
                 bot.answer_callback_query(call.id, f"❌ خطا: {str(e)}", show_alert=True)
@@ -672,7 +657,7 @@ def handle_callback_query(bot, call, user_data):
         show_force_sub_settings(bot, chat_id, message_id)
         return
     
-    # ===== تنظیمات =====
+    # ===== تنظیمات جدید =====
     elif data == "setting_quota":
         lang = get_user_language(user_id) or "fa"
         if not is_owner(user_id) and not has_permission(user_id, "can_manage_settings"):
@@ -695,18 +680,6 @@ def handle_callback_query(bot, call, user_data):
         user_data[chat_id] = {'step': 'set_max_file_size', 'message_id': msg.message_id}
         return
     
-    elif data == "setting_active":
-        lang = get_user_language(user_id) or "fa"
-        if not is_owner(user_id) and not has_permission(user_id, "can_manage_settings"):
-            bot.answer_callback_query(call.id, get_message("admin_no_permission", lang), show_alert=True)
-            return
-        current = get_setting("is_active", "True")
-        new_value = "False" if current == "True" else "True"
-        set_setting("is_active", new_value)
-        bot.answer_callback_query(call.id, f"✅ وضعیت تغییر کرد: {'فعال' if new_value == 'True' else 'غیرفعال'}", show_alert=True)
-        show_settings(bot, chat_id, message_id)
-        return
-    
     elif data == "setting_rate_limit":
         lang = get_user_language(user_id) or "fa"
         if not is_owner(user_id) and not has_permission(user_id, "can_manage_settings"):
@@ -714,6 +687,23 @@ def handle_callback_query(bot, call, user_data):
             return
         bot.answer_callback_query(call.id, "⏱️ تنظیمات محدودیت زمانی", show_alert=False)
         show_rate_limit_settings(bot, chat_id, message_id)
+        return
+    
+    elif data == "setting_toggle_active":
+        lang = get_user_language(user_id) or "fa"
+        if not is_owner(user_id) and not has_permission(user_id, "can_manage_settings"):
+            bot.answer_callback_query(call.id, get_message("admin_no_permission", lang), show_alert=True)
+            return
+        current = get_setting("is_active", "True")
+        new_value = "False" if current == "True" else "True"
+        set_setting("is_active", new_value)
+        if lang == "en":
+            status_text = "Active" if new_value == "True" else "Inactive"
+            bot.answer_callback_query(call.id, f"✅ Bot status changed to {status_text}!", show_alert=True)
+        else:
+            status_text = "فعال" if new_value == "True" else "غیرفعال"
+            bot.answer_callback_query(call.id, f"✅ وضعیت ربات به {status_text} تغییر کرد!", show_alert=True)
+        show_settings(bot, chat_id, message_id)
         return
     
     # ===== محدودیت زمانی =====
@@ -994,7 +984,6 @@ def handle_message(bot, message, user_data, user_last_download=None):
     
     # ===== /start =====
     if text and text.startswith('/start'):
-        # ===== ارسال دکمه‌های انتخاب زبان =====
         keyboard = get_language_keyboard()
         bot.send_message(chat_id, get_message("lang_selection", "fa"), reply_markup=keyboard)
         return

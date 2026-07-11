@@ -1246,4 +1246,162 @@ def handle_message(bot, message, user_data, user_last_download=None):
             del bot.user_data[chat_id]
         return
     elif step == 'premium_rate':
-        if not is_owner(user_id) and not has_permission(user_id, "can_manage
+        if not is_owner(user_id) and not has_permission(user_id, "can_manage_premium"):
+            bot.send_message(chat_id, get_message("admin_no_permission", lang))
+            return
+        premium_user_id = step_data.get('premium_user_id')
+        try:
+            rate = int(text.strip())
+            set_premium_status(premium_user_id, True, rate_limit=rate)
+            bot.send_message(chat_id, get_message("settings_updated", lang))
+            if chat_id in user_data:
+                msg_id = user_data[chat_id].get('message_id')
+                if msg_id:
+                    try:
+                        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+                    except:
+                        pass
+            show_premium_user_settings(bot, chat_id, premium_user_id, None, user_id)
+        except ValueError:
+            bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
+        if chat_id in user_data:
+            del user_data[chat_id]
+        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
+            del bot.user_data[chat_id]
+        return
+    
+    # تنظیمات عمومی
+    elif step == 'set_daily_quota':
+        if not is_owner(user_id) and not has_permission(user_id, "can_manage_settings"):
+            bot.send_message(chat_id, get_message("admin_no_permission", lang))
+            return
+        try:
+            quota = int(text.strip())
+            set_setting("daily_quota", str(quota))
+            bot.send_message(chat_id, get_message("settings_updated", lang))
+            if chat_id in user_data:
+                msg_id = user_data[chat_id].get('message_id')
+                if msg_id:
+                    try:
+                        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+                    except:
+                        pass
+            show_settings(bot, chat_id)
+        except ValueError:
+            bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
+        if chat_id in user_data:
+            del user_data[chat_id]
+        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
+            del bot.user_data[chat_id]
+        return
+    elif step == 'set_max_file_size':
+        if not is_owner(user_id) and not has_permission(user_id, "can_manage_settings"):
+            bot.send_message(chat_id, get_message("admin_no_permission", lang))
+            return
+        try:
+            size = int(text.strip())
+            set_setting("max_file_size", str(size))
+            bot.send_message(chat_id, get_message("settings_updated", lang))
+            if chat_id in user_data:
+                msg_id = user_data[chat_id].get('message_id')
+                if msg_id:
+                    try:
+                        bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+                    except:
+                        pass
+            show_settings(bot, chat_id)
+        except ValueError:
+            bot.send_message(chat_id, "❌ لطفاً یک عدد معتبر وارد کنید!")
+        if chat_id in user_data:
+            del user_data[chat_id]
+        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
+            del bot.user_data[chat_id]
+        return
+    
+    # اضافه کردن کانال اجباری
+    elif step == 'add_force_channel':
+        if not is_owner(user_id) and not has_permission(user_id, "can_manage_force_sub"):
+            bot.send_message(chat_id, get_message("admin_no_permission", lang))
+            return
+        channel = text.strip()
+        if not channel.startswith('@'):
+            bot.send_message(chat_id, "❌ لطفاً آیدی کانال را با @ شروع کنید!")
+            return
+        add_force_channel(channel)
+        bot.send_message(chat_id, f"✅ کانال {channel} به لیست اضافه شد.")
+        if chat_id in user_data:
+            msg_id = user_data[chat_id].get('message_id')
+            if msg_id:
+                try:
+                    bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+                except:
+                    pass
+        show_force_sub_settings(bot, chat_id)
+        if chat_id in user_data:
+            del user_data[chat_id]
+        if hasattr(bot, 'user_data') and chat_id in bot.user_data:
+            del bot.user_data[chat_id]
+        return
+    
+    # ارسال همگانی
+    elif step == 'broadcast':
+        process_broadcast_message(bot, message, user_data)
+        return
+    
+    # ===== پردازش معمولی (لینک یا دستور) =====
+    if text.startswith('/'):
+        # دستورات به صورت جداگانه در app.py یا bot.py پردازش می‌شوند
+        pass
+    elif text.startswith('http://') or text.startswith('https://'):
+        # ===== دانلود =====
+        # بررسی فعال بودن ربات
+        if get_setting("is_active", "True") != "True":
+            bot.send_message(chat_id, get_message("bot_inactive", lang))
+            return
+        # بررسی سقف دانلود
+        if not is_admin(user_id):
+            daily_quota = get_user_daily_quota(user_id)
+            if daily_quota is not None and daily_quota <= 0:
+                bot.send_message(chat_id, get_message("daily_quota_reached", lang))
+                return
+        # محدودیت زمانی
+        if get_rate_limit_enabled() and not is_admin(user_id):
+            last_time = user_last_download.get(user_id, 0) if user_last_download is not None else 0
+            current_time = time.time()
+            if current_time - last_time < get_rate_limit_seconds():
+                wait_time = int(get_rate_limit_seconds() - (current_time - last_time))
+                bot.send_message(chat_id, get_message("rate_limit_wait", lang).format(seconds=wait_time))
+                return
+        # دانلود
+        msg = bot.send_message(chat_id, get_message("downloading", lang))
+        try:
+            files, error = download_instagram_post(text, user_id)
+            if files:
+                for f in files:
+                    try:
+                        if f.endswith('.mp4'):
+                            with open(f, 'rb') as video:
+                                bot.send_video(chat_id, video, caption="✅ دانلود شد!")
+                        else:
+                            with open(f, 'rb') as img:
+                                bot.send_photo(chat_id, img, caption="✅ دانلود شد!")
+                        os.remove(f)
+                    except Exception as e:
+                        logging.error(f"Error sending file: {e}")
+                        bot.send_message(chat_id, f"❌ خطا در ارسال فایل: {e}")
+                if user_last_download is not None:
+                    user_last_download[user_id] = time.time()
+                bot.delete_message(chat_id, msg.message_id)
+            else:
+                bot.edit_message_text(f"❌ خطا: {error}", chat_id, msg.message_id)
+        except Exception as e:
+            logging.error(f"Download error: {e}")
+            bot.edit_message_text(f"❌ خطا: {e}", chat_id, msg.message_id)
+    else:
+        # پیام معمولی
+        if is_admin(user_id):
+            keyboard = get_admin_keyboard(lang)
+            bot.send_message(chat_id, get_message("admin_welcome", lang), reply_markup=keyboard)
+        else:
+            keyboard = get_user_keyboard()
+            bot.send_message(chat_id, get_message("start", lang), reply_markup=keyboard)

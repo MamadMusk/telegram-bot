@@ -5,7 +5,6 @@ import os
 import requests
 import yt_dlp
 import threading
-import inspect  # برای بررسی پارامترهای توابع
 from datetime import datetime, timezone
 from telebot.types import MenuButtonCommands, InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -53,10 +52,7 @@ broadcast_jobs = {}
 # ===================================================
 def send_welcome_message(bot, chat_id, user_id, lang=None):
     if lang is None:
-        try:
-            lang = get_user_language(user_id) or "fa"
-        except:
-            lang = "fa"
+        lang = get_user_language(user_id) or "fa"
     if is_admin(user_id):
         keyboard = get_admin_keyboard(lang)
     else:
@@ -87,13 +83,10 @@ def check_user_subscription(bot, user_id):
     return len(not_subscribed) == 0, not_subscribed
 
 def has_permission(user_id, permission):
-    try:
-        perms = get_admin_permissions(user_id)
-        result = perms.get(permission, False)
-        logging.info(f"🔍 Permission check: {permission} for {user_id} = {result}")
-        return result
-    except:
-        return False
+    perms = get_admin_permissions(user_id)
+    result = perms.get(permission, False)
+    logging.info(f"🔍 Permission check: {permission} for {user_id} = {result}")
+    return result
 
 def is_owner(user_id):
     return user_id == OWNER_ID
@@ -171,16 +164,15 @@ def download_instagram_post(url, user_id):
 # ===================================================
 def generate_daily_report():
     """تولید گزارش روزانه از وضعیت ربات"""
-    try:
-        stats = get_stats()
-        total_downloads = get_total_downloads()
-        premium_users = get_all_premium_users()
-        admins = get_all_admins()
-        
-        new_users_today = get_new_users_today()
-        failed_downloads = get_failed_downloads_today()
-        
-        report = f"""📊 <b>گزارش روزانه ربات</b>
+    stats = get_stats()
+    total_downloads = get_total_downloads()
+    premium_users = get_all_premium_users()
+    admins = get_all_admins()
+    
+    new_users_today = get_new_users_today()
+    failed_downloads = get_failed_downloads_today()
+    
+    report = f"""📊 <b>گزارش روزانه ربات</b>
 
 📅 تاریخ: {datetime.now().strftime('%Y/%m/%d')}
 ⏰ زمان: {datetime.now().strftime('%H:%M')}
@@ -198,28 +190,25 @@ def generate_daily_report():
 
 👑 <b>کاربران ویژه فعال:</b>
 """
-        if premium_users:
-            for user in premium_users[:10]:
-                name = user.get('first_name', 'Unknown')
-                username = user.get('username', '')
-                days_left = user.get('days_left')
-                days_text = f"({days_left} روز مانده)" if days_left is not None else "(همیشه)"
-                report += f"• {name} (@{username}) {days_text}\n"
-            if len(premium_users) > 10:
-                report += f"... و {len(premium_users) - 10} کاربر دیگر\n"
-        else:
-            report += "• هیچ کاربر ویژه‌ای فعال نیست.\n"
-        
-        report += f"""
+    if premium_users:
+        for user in premium_users[:10]:
+            name = user.get('first_name', 'Unknown')
+            username = user.get('username', '')
+            days_left = user.get('days_left')
+            days_text = f"({days_left} روز مانده)" if days_left is not None else "(همیشه)"
+            report += f"• {name} (@{username}) {days_text}\n"
+        if len(premium_users) > 10:
+            report += f"... و {len(premium_users) - 10} کاربر دیگر\n"
+    else:
+        report += "• هیچ کاربر ویژه‌ای فعال نیست.\n"
+    
+    report += f"""
 📊 <b>وضعیت ربات:</b>
 • وضعیت: {'🟢 فعال' if get_setting('is_active', 'True') == 'True' else '🔴 غیرفعال'}
 • سقف دانلود روزانه: {get_setting('daily_quota', '10')}
 • محدودیت زمانی: {'فعال' if get_rate_limit_enabled() else 'غیرفعال'} ({get_rate_limit_seconds()} ثانیه)
 """
-        return report
-    except Exception as e:
-        logging.error(f"Error generating report: {e}")
-        return "❌ خطا در تولید گزارش"
+    return report
 
 def send_daily_report(bot, chat_id, lang="fa"):
     """ارسال گزارش روزانه به ادمین"""
@@ -1070,7 +1059,7 @@ def handle_callback_query(bot, call, user_data):
         return
 
 # ===================================================
-# 📨 پردازش پیام (نسخه‌ی اصلی با مدیریت خطا)
+# 📨 پردازش پیام (نسخه نهایی با پشتیبانی از دکمه‌های منو)
 # ===================================================
 def handle_message(bot, message, user_data, user_last_download=None):
     try:
@@ -1082,33 +1071,18 @@ def handle_message(bot, message, user_data, user_last_download=None):
         last_name = message.from_user.last_name or ""
         logging.info(f"📨 Message from {chat_id}: {text}")
         
-        # ===== دریافت زبان کاربر با مدیریت خطا =====
+        # ===== دریافت زبان کاربر =====
         try:
             lang = get_user_language(user_id) or "fa"
-        except Exception as e:
-            logging.error(f"Error getting language: {e}")
+        except:
             lang = "fa"
         
-        # ===== اضافه کردن کاربر با مدیریت خطا (سازگار با هر امضایی) =====
+        # ===== اضافه کردن کاربر =====
         try:
-            # بررسی امضای تابع add_user
-            sig = inspect.signature(add_user)
-            params = list(sig.parameters.keys())
-            
-            # اگر پارامتر lang وجود دارد، با lang صدا بزن
-            if 'lang' in params:
-                add_user(user_id, username, first_name, last_name, lang)
-            else:
-                # در غیر این صورت فقط ۴ پارامتر اول رو پاس بده
-                add_user(user_id, username, first_name, last_name)
-                # سپس زبان رو جداگانه تنظیم کن
-                try:
-                    set_user_language(user_id, lang)
-                except:
-                    pass
+            add_user(user_id, username, first_name, last_name, lang)
         except Exception as e:
             logging.error(f"Error adding user: {e}")
-            # حتی اگر کاربر اضافه نشد، ادامه بده تا ربات حداقل پاسخ بده
+            # ادامه بده
         
         # ===== عضویت اجباری =====
         if not is_admin(user_id):
@@ -1126,7 +1100,6 @@ def handle_message(bot, message, user_data, user_last_download=None):
                     return
             except Exception as e:
                 logging.error(f"Error checking subscription: {e}")
-                # در صورت خطا، اجازه بده ادامه بده (مشکل عضویت رو نادیده بگیر)
         
         # ===== پردازش مراحل (user_data) =====
         step_data = user_data.get(chat_id, {})
@@ -1397,7 +1370,34 @@ def handle_message(bot, message, user_data, user_last_download=None):
             return
         
         # ===================================================
-        # ===== پردازش معمولی (لینک یا دستور) =====
+        # ===== 🆕 پردازش دکمه‌های منوی ادمین (Reply Keyboard) =====
+        # ===================================================
+        
+        # فقط کاربران ادمین می‌تونن از این دکمه‌ها استفاده کنن
+        if is_admin(user_id):
+            # دیکشنری مپ کردن متن دکمه به تابع مربوطه
+            admin_menu_handlers = {
+                "📊 آمار ربات": lambda: show_stats(bot, chat_id),
+                "📋 گزارش روزانه": lambda: send_daily_report(bot, chat_id, lang),
+                "👥 مدیریت کاربران و ادمین‌ها": lambda: show_admin_list(bot, chat_id, None, user_id),
+                "👑 کاربران ویژه": lambda: show_premium_users(bot, chat_id, None, user_id),
+                "📨 ارسال همگانی": lambda: start_broadcast(bot, chat_id, user_data),
+                "⚙️ تنظیمات ربات": lambda: show_settings(bot, chat_id),
+                "🔒 قفل اسپانسر": lambda: show_force_sub_settings(bot, chat_id),
+                "🔙 بازگشت به منوی اصلی": lambda: send_welcome_message(bot, chat_id, user_id, lang)
+            }
+            
+            # بررسی اینکه آیا متن پیام با یکی از دکمه‌ها مطابقت داره
+            if text in admin_menu_handlers:
+                try:
+                    admin_menu_handlers[text]()
+                except Exception as e:
+                    logging.error(f"Error in admin menu handler: {e}")
+                    bot.send_message(chat_id, f"❌ خطا: {e}")
+                return  # مهم: بعد از اجرا، از تابع خارج میشه تا دوباره کیبورد نشون نده
+        
+        # ===================================================
+        # ===== پردازش دستورات و لینک‌ها (برای همه) =====
         # ===================================================
         
         if text.startswith('/'):
@@ -1471,7 +1471,7 @@ def handle_message(bot, message, user_data, user_last_download=None):
                 bot.edit_message_text(f"❌ خطا: {e}", chat_id, msg.message_id)
         
         else:
-            # پیام معمولی (نه دستور و نه لینک)
+            # ===== پیام معمولی (نه دستور و نه لینک) =====
             if is_admin(user_id):
                 keyboard = get_admin_keyboard(lang)
                 bot.send_message(chat_id, get_message("admin_welcome", lang), reply_markup=keyboard)

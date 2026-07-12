@@ -303,27 +303,38 @@ MESSAGES = MESSAGES_FA
 # ⌨️ دکمه‌های شیشه‌ای (Reply Keyboard - فقط برای ادمین)
 # ===================================================
 def get_admin_keyboard(lang: str = "fa"):
+    """
+    کیبورد مدیریت با ترتیب:
+    ردیف 1: مدیریت کاربران | گزارش | آمار
+    ردیف 2: قفل اسپانسر | ارسال همگانی
+    ردیف 3: تنظیمات
+    """
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=3)
+    
     if lang == "en":
-        btn_stats = KeyboardButton("📊 Statistics")
-        btn_report = KeyboardButton("📋 Daily Report")
         btn_users = KeyboardButton("👥 Users & Admins")
+        btn_report = KeyboardButton("📋 Report")
+        btn_stats = KeyboardButton("📊 Statistics")
         btn_force_sub = KeyboardButton("🔒 Force Subscribe")
         btn_broadcast = KeyboardButton("📨 Broadcast")
         btn_settings = KeyboardButton("⚙️ Settings")
     else:
-        btn_stats = KeyboardButton("📊 آمار ربات")
-        btn_report = KeyboardButton("📋 گزارش روزانه")
         btn_users = KeyboardButton("👥 مدیریت کاربران و ادمین‌ها")
+        btn_report = KeyboardButton("📋 گزارش روزانه")
+        btn_stats = KeyboardButton("📊 آمار ربات")
         btn_force_sub = KeyboardButton("🔒 قفل اسپانسر")
         btn_broadcast = KeyboardButton("📨 ارسال همگانی")
         btn_settings = KeyboardButton("⚙️ تنظیمات ربات")
     
-    # ردیف اول: ۳ دکمه
-    keyboard.add(btn_stats, btn_report, btn_users)
-    # ردیف دوم: ۲ دکمه
+    # ردیف ۱: سه دکمه
+    keyboard.add(btn_users, btn_report, btn_stats)
+    
+    # ردیف ۲: دو دکمه
+    keyboard.row_width = 2
     keyboard.add(btn_force_sub, btn_broadcast)
-    # ردیف سوم: ۱ دکمه
+    
+    # ردیف ۳: یک دکمه
+    keyboard.row_width = 1
     keyboard.add(btn_settings)
     
     return keyboard
